@@ -77,10 +77,17 @@
     <div class="levels" id="levels"></div>
     <div class="card">
       <div class="row" style="justify-content:space-between">
+        <span>Test type</span>
+        <div class="row" id="modes"></div>
+      </div>
+      <p class="hint" id="modeHint"></p>
+    </div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
         <span>Song reminders under each interval</span>
         <button class="pill" id="songToggleStart"></button>
       </div>
-      <p class="hint">Each interval comes up once, in a random order. You get three tries at each one. There's no timer, so take as long as you like and replay as often as you need.</p>
+      <p class="hint">You get three tries at each one. There's no timer, so take as long as you like and replay as often as you need.</p>
     </div>
     <button class="big" id="go">Start the test</button>
   </section>
@@ -141,6 +148,11 @@ const LEVELS = [
   { id:2, title:"Level 2", desc:"Minor 2nd up to the octave",    set:[1,2,3,4,5,6,7,8,9,10,11,12] },
 ];
 
+const MODES = [
+  { id:"each", label:"One of each", hint:"Every interval in the level comes up once, in a random order." },
+  { id:"ten",  label:"10 random",   hint:"Ten intervals picked at random from the level, so some will come up more than once." },
+];
+
 const TRIES = 3;
 const $ = id => document.getElementById(id);
 const store = {
@@ -149,6 +161,7 @@ const store = {
 };
 
 let level = LEVELS.find(l => l.id === store.get("level", 1)) || LEVELS[0];
+let mode = MODES.find(m => m.id === store.get("mode", "each")) || MODES[0];
 let showSongs = store.get("songs", true);
 let queue = [], qi = 0, root = 0, triesLeft = TRIES, done = false, results = [];
 
@@ -215,6 +228,28 @@ function renderLevels() {
   });
 }
 
+function renderModes() {
+  $("modes").innerHTML = "";
+  MODES.forEach(m => {
+    const b = document.createElement("button");
+    b.className = "pill" + (m === mode ? " on" : "");
+    b.textContent = m.label;
+    b.onclick = () => { mode = m; store.set("mode", m.id); renderModes(); };
+    $("modes").appendChild(b);
+  });
+  $("modeHint").textContent = mode.hint;
+}
+
+// Ten picks from the level, never the same interval twice in a row
+function tenRandom(set) {
+  const q = [];
+  while (q.length < 10) {
+    const n = set[Math.floor(Math.random() * set.length)];
+    if (n !== q[q.length - 1]) q.push(n);
+  }
+  return q;
+}
+
 function renderSongToggles() {
   const label = showSongs ? "Hide songs" : "Show songs";
   $("songToggleStart").textContent = label;
@@ -227,7 +262,7 @@ function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.fl
 
 function startTest() {
   audio();
-  queue = shuffle(level.set.slice());
+  queue = mode.id === "ten" ? tenRandom(level.set) : shuffle(level.set.slice());
   qi = 0; results = [];
   show("test");
   renderAnswers();
@@ -302,13 +337,14 @@ function finish() {
   const got = results.filter(r => r.tries > 0).length;
   $("score").textContent = `${got} / ${results.length}`;
   $("scoreNote").textContent = `${first} first time, ${got - first} after another try, ${results.length - got} to keep working on.`;
-  const rows = INTERVALS.filter(i => level.set.includes(i.n)).map(i => {
-    const r = results.find(x => x.n === i.n);
-    const txt = r.tries === 0 ? '<span class="no">Missed</span>'
-      : r.tries === 1 ? '<span class="ok">First try</span>'
-      : `<span class="ok">Try ${r.tries}</span>`;
-    return `<tr><td>${i.name}</td><td class="r">${txt}</td></tr>`;
-  });
+  const verdict = r => r.tries === 0 ? '<span class="no">Missed</span>'
+    : r.tries === 1 ? '<span class="ok">First try</span>'
+    : `<span class="ok">Try ${r.tries}</span>`;
+  // One of each: list by interval. Ten random: list in the order they came.
+  const rows = mode.id === "ten"
+    ? results.map((r, i) => `<tr><td>${i + 1}. ${name(r.n)}</td><td class="r">${verdict(r)}</td></tr>`)
+    : INTERVALS.filter(i => level.set.includes(i.n)).map(i =>
+        `<tr><td>${i.name}</td><td class="r">${verdict(results.find(x => x.n === i.n))}</td></tr>`);
   $("breakdown").innerHTML = rows.join("");
   show("results");
 }
@@ -316,13 +352,14 @@ function finish() {
 // ---------- Wire up ----------
 $("go").onclick = startTest;
 $("again").onclick = startTest;
-$("home").onclick = () => { renderLevels(); show("start"); };
+$("home").onclick = () => { renderLevels(); renderModes(); show("start"); };
 $("quit").onclick = () => { stopAll(); renderLevels(); show("start"); };
 $("replay").onclick = () => playInterval(queue[qi]);
 $("next").onclick = () => { qi++; nextQuestion(); };
 $("songToggleStart").onclick = toggleSongs;
 $("songToggle").onclick = toggleSongs;
 renderLevels();
+renderModes();
 renderSongToggles();
 </script>
 </body>
