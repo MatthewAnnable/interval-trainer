@@ -48,6 +48,7 @@
   .ans b { display:block; font-size:16px; }
   .ans .frets { color:var(--mute); font-weight:400; font-size:13px; margin-left:4px; }
   .ans .songs { color:var(--mute); font-size:13px; margin-top:4px; line-height:1.35; }
+  .ans .songs .arrow { display:inline-block; width:1.1em; color:var(--accent); font-weight:700; }
   .ans .songs strong { color:var(--ink); font-weight:600; }
   .hide-songs .songs { display:none; }
   .ans.wrong { background:var(--badbg); border-color:var(--bad); opacity:.75; }
@@ -70,7 +71,7 @@
 <body>
 <div class="wrap">
   <h1>Interval Ear Trainer</h1>
-  <p class="sub">Listen to two notes, the first one then a higher one, and work out the jump between them.</p>
+  <p class="sub">Listen to two notes and work out the jump between them.</p>
 
   <!-- Start screen -->
   <section id="start">
@@ -79,6 +80,10 @@
       <div class="row" style="justify-content:space-between">
         <span>Test type</span>
         <div class="row" id="modes"></div>
+      </div>
+      <div class="row" style="justify-content:space-between;margin-top:12px">
+        <span>Direction</span>
+        <div class="row" id="dirs"></div>
       </div>
       <p class="hint" id="modeHint"></p>
     </div>
@@ -128,16 +133,17 @@
 
 <script>
 // Songs are word for word from the "Hearing intervals" worksheet.
+// `down` songs were chosen with Matthew on 02/11/2026; most intervals have none yet.
 const INTERVALS = [
-  { n:1,  name:"Minor 2nd",   songs:["<strong>Jaws</strong> theme", "<strong>The Pink Panther</strong> theme"] },
-  { n:2,  name:"Major 2nd",   songs:["<strong>Happy Birthday</strong> (on “py birth”)", "<strong>Frère Jacques</strong> (first two notes)"] },
-  { n:3,  name:"Minor 3rd",   songs:["<strong>Seven Nation Army</strong> (the riff)", "<strong>Greensleeves</strong>"] },
-  { n:4,  name:"Major 3rd",   songs:["<strong>Oh When the Saints</strong>", "<strong>Kumbaya</strong>"] },
+  { n:1,  name:"Minor 2nd",   songs:["<strong>Jaws</strong> theme", "<strong>The Pink Panther</strong> theme"], down:["<strong>Für Elise</strong> (first two notes)"] },
+  { n:2,  name:"Major 2nd",   songs:["<strong>Happy Birthday</strong> (on “py birth”)", "<strong>Frère Jacques</strong> (first two notes)"], down:["<strong>Three Blind Mice</strong>"] },
+  { n:3,  name:"Minor 3rd",   songs:["<strong>Seven Nation Army</strong> (the riff)", "<strong>Greensleeves</strong>"], down:["<strong>Hey Jude</strong> (on “Hey Jude”)"] },
+  { n:4,  name:"Major 3rd",   songs:["<strong>Oh When the Saints</strong>", "<strong>Kumbaya</strong>"], down:["<strong>Swing Low, Sweet Chariot</strong> (on “Swing low”)"] },
   { n:5,  name:"Perfect 4th", songs:["<strong>Harry Potter</strong> (Hedwig’s Theme)", "<strong>Here Comes the Bride</strong>"] },
   { n:6,  name:"Tritone",     songs:["<strong>The Simpsons</strong> theme (on “The Simp-”)"] },
   { n:7,  name:"Perfect 5th", songs:["<strong>Star Wars</strong> main theme", "<strong>Twinkle Twinkle Little Star</strong>"] },
   { n:8,  name:"Minor 6th",   songs:["<strong>The Entertainer</strong> (the leap at the start)"] },
-  { n:9,  name:"Major 6th",   songs:["<strong>Jingle Bells</strong> (on “Dashing”)", "<strong>Sweet Caroline</strong> (the chorus, going down)", "<strong>Until I Found You</strong> (going down)"] },
+  { n:9,  name:"Major 6th",   songs:["<strong>Jingle Bells</strong> (on “Dashing”)", "<strong>Sweet Caroline</strong> (the chorus, going down)", "<strong>Until I Found You</strong> (going down)"], down:["<strong>Sweet Caroline</strong> (the chorus)", "<strong>Until I Found You</strong>"] },
   { n:10, name:"Minor 7th",   songs:["<strong>Can’t Stop</strong> (first two notes of the riff)", "<strong>The Winner Takes It All</strong>"] },
   { n:11, name:"Major 7th",   songs:["<strong>Take On Me</strong> (the chorus)"] },
   { n:12, name:"Octave",      songs:["<strong>Somewhere Over the Rainbow</strong> (on “Some-where”)"] },
@@ -153,6 +159,12 @@ const MODES = [
   { id:"ten",  label:"10 random",   hint:"Ten intervals picked at random from the level, so some will come up more than once." },
 ];
 
+const DIRS = [
+  { id:"up",   label:"Going up" },
+  { id:"down", label:"Going down" },
+  { id:"both", label:"Both" },
+];
+
 const TRIES = 3;
 const $ = id => document.getElementById(id);
 const store = {
@@ -162,8 +174,9 @@ const store = {
 
 let level = LEVELS.find(l => l.id === store.get("level", 1)) || LEVELS[0];
 let mode = MODES.find(m => m.id === store.get("mode", "each")) || MODES[0];
+let dir = DIRS.find(d => d.id === store.get("dir", "up")) || DIRS[0];
 let showSongs = store.get("songs", true);
-let queue = [], qi = 0, root = 0, triesLeft = TRIES, done = false, results = [];
+let queue = [], qi = 0, root = 0, qdir = "up", triesLeft = TRIES, done = false, results = [];
 
 // ---------- Sound: a plucked string (Karplus-Strong) ----------
 let ctx = null;
@@ -206,12 +219,18 @@ function playNote(midi, when) {
   const g = ctx.createGain(); g.gain.value = 0.55;
   src.connect(lp).connect(g).connect(ctx.destination);
   src.start(when); playing.push(src);
+  return g;
 }
+// `root` is always the lower note; going down plays the top note first.
 function playInterval(semis) {
   audio(); stopAll();
   const t = ctx.currentTime + 0.05;
-  playNote(root, t);
-  playNote(root + semis, t + 1.0);
+  const [a, b] = qdir === "down" ? [root + semis, root] : [root, root + semis];
+  const g = playNote(a, t);
+  // Damp the first note just before the second, so they never ring together
+  g.gain.setValueAtTime(0.55, t + 0.94);
+  g.gain.linearRampToValueAtTime(0, t + 1.0);
+  playNote(b, t + 1.0);
 }
 
 // ---------- Screens ----------
@@ -250,6 +269,27 @@ function tenRandom(set) {
   return q;
 }
 
+function renderDirs() {
+  $("dirs").innerHTML = "";
+  DIRS.forEach(d => {
+    const b = document.createElement("button");
+    b.className = "pill" + (d === dir ? " on" : "");
+    b.textContent = d.label;
+    b.onclick = () => { dir = d; store.set("dir", d.id); renderDirs(); };
+    $("dirs").appendChild(b);
+  });
+}
+
+// Going up only: the worksheet as it is. Otherwise both lists, arrowed, with the
+// worksheet's "going down" songs moved into the down list rather than shown twice.
+function songsHtml(iv) {
+  if (dir.id === "up") return iv.songs.join("<br>");
+  const down = iv.down || [];
+  const up = down.length ? iv.songs.filter(t => !t.includes("going down")) : iv.songs;
+  return up.map(t => `<span class="arrow">↑</span>${t}`)
+    .concat(down.map(t => `<span class="arrow">↓</span>${t}`)).join("<br>");
+}
+
 function renderSongToggles() {
   const label = showSongs ? "Hide songs" : "Show songs";
   $("songToggleStart").textContent = label;
@@ -275,7 +315,7 @@ function renderAnswers() {
     const iv = INTERVALS.find(i => i.n === n);
     const b = document.createElement("button");
     b.className = "ans"; b.dataset.n = n;
-    b.innerHTML = `<b>${iv.name}<span class="frets">${n} fret${n > 1 ? "s" : ""}</span></b><div class="songs">${iv.songs.join("<br>")}</div>`;
+    b.innerHTML = `<b>${iv.name}<span class="frets">${n} fret${n > 1 ? "s" : ""}</span></b><div class="songs">${songsHtml(iv)}</div>`;
     b.onclick = () => answer(n, b);
     $("answers").appendChild(b);
   });
@@ -286,6 +326,7 @@ function nextQuestion() {
   if (qi >= queue.length) return finish();
   // Root somewhere from A2 to C4, so even an octave stays in a comfy guitar range
   root = 45 + Math.floor(Math.random() * 16);
+  qdir = dir.id === "both" ? (Math.random() < 0.5 ? "up" : "down") : dir.id;
   triesLeft = TRIES; done = false;
   document.querySelectorAll(".ans").forEach(b => { b.className = "ans"; b.disabled = false; });
   $("next").hidden = true; $("compareHint").hidden = true;
@@ -303,7 +344,7 @@ function answer(n, btn) {
   if (done) { playInterval(n); return; } // compare mode once the question is over
   if (n === target) {
     btn.classList.add("right");
-    results.push({ n: target, tries: TRIES - triesLeft + 1 });
+    results.push({ n: target, dir: qdir, tries: TRIES - triesLeft + 1 });
     endQuestion("good", `Yes, that's a ${name(target)}!`);
     return;
   }
@@ -314,7 +355,7 @@ function answer(n, btn) {
     playInterval(target);
   } else {
     document.querySelector(`.ans[data-n="${target}"]`).classList.add("right");
-    results.push({ n: target, tries: 0 });
+    results.push({ n: target, dir: qdir, tries: 0 });
     endQuestion("bad", `It was a ${name(target)}. Listen again…`);
     playInterval(target);
   }
@@ -340,11 +381,12 @@ function finish() {
   const verdict = r => r.tries === 0 ? '<span class="no">Missed</span>'
     : r.tries === 1 ? '<span class="ok">First try</span>'
     : `<span class="ok">Try ${r.tries}</span>`;
+  const arrow = n => dir.id === "both" ? (results.find(x => x.n === n).dir === "down" ? " ↓" : " ↑") : "";
   // One of each: list by interval. Ten random: list in the order they came.
   const rows = mode.id === "ten"
-    ? results.map((r, i) => `<tr><td>${i + 1}. ${name(r.n)}</td><td class="r">${verdict(r)}</td></tr>`)
+    ? results.map((r, i) => `<tr><td>${i + 1}. ${name(r.n)}${r.dir === "down" ? " ↓" : ""}</td><td class="r">${verdict(r)}</td></tr>`)
     : INTERVALS.filter(i => level.set.includes(i.n)).map(i =>
-        `<tr><td>${i.name}</td><td class="r">${verdict(results.find(x => x.n === i.n))}</td></tr>`);
+        `<tr><td>${i.name}${arrow(i.n)}</td><td class="r">${verdict(results.find(x => x.n === i.n))}</td></tr>`);
   $("breakdown").innerHTML = rows.join("");
   show("results");
 }
@@ -352,7 +394,7 @@ function finish() {
 // ---------- Wire up ----------
 $("go").onclick = startTest;
 $("again").onclick = startTest;
-$("home").onclick = () => { renderLevels(); renderModes(); show("start"); };
+$("home").onclick = () => { renderLevels(); renderModes(); renderDirs(); show("start"); };
 $("quit").onclick = () => { stopAll(); renderLevels(); show("start"); };
 $("replay").onclick = () => playInterval(queue[qi]);
 $("next").onclick = () => { qi++; nextQuestion(); };
@@ -360,6 +402,7 @@ $("songToggleStart").onclick = toggleSongs;
 $("songToggle").onclick = toggleSongs;
 renderLevels();
 renderModes();
+renderDirs();
 renderSongToggles();
 </script>
 </body>
