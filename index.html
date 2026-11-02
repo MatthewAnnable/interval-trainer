@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Interval Ear Trainer</title>
+<style>
+  :root {
+    --bg:#faf7f2; --ink:#1d1b19; --mute:#7a746b; --card:#fff; --line:#e4ddd0; --accent:#8a4b1f; --chip:#f1ebe1;
+    --good:#1d8a5f; --goodbg:#e3f3ea; --bad:#c2502b; --badbg:#fbe9e2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#181614; --ink:#f0ebe3; --mute:#9c958a; --card:#23201d; --line:#3a352f; --accent:#e0a064; --chip:#2e2a26;
+      --good:#5cc79a; --goodbg:#1c3229; --bad:#ef8a66; --badbg:#3a231b;
+    }
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+  .wrap { max-width:760px; margin:0 auto; padding:20px 16px 48px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .sub { color:var(--mute); margin:0 0 18px; font-size:15px; }
+  button { font:inherit; color:inherit; cursor:pointer; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .pill { border:1.5px solid var(--line); background:var(--card); border-radius:22px; padding:8px 16px; font-weight:600; }
+  .pill.on { background:var(--ink); color:var(--bg); border-color:var(--ink); }
+  .big { background:var(--accent); color:#fff; border:0; border-radius:12px; padding:14px 22px; font-size:17px; font-weight:700; }
+  @media (prefers-color-scheme: dark) { .big { color:#181614; } }
+  .ghost { background:none; border:1.5px solid var(--line); border-radius:12px; padding:12px 18px; font-weight:600; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin:14px 0; }
+  .levels { display:grid; gap:10px; grid-template-columns:1fr 1fr; }
+  .level { text-align:left; border:1.5px solid var(--line); background:var(--card); border-radius:12px; padding:14px; }
+  .level.on { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent) inset; }
+  .level b { display:block; font-size:16px; }
+  .level span { color:var(--mute); font-size:14px; }
+  .top { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:6px; }
+  .progress { color:var(--mute); font-size:14px; }
+  .bar { height:6px; background:var(--chip); border-radius:3px; overflow:hidden; margin:6px 0 14px; }
+  .bar i { display:block; height:100%; background:var(--accent); width:0; transition:width .3s; }
+  .play { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .msg { min-height:28px; margin:14px 0 6px; font-weight:600; font-size:17px; }
+  .msg.good { color:var(--good); } .msg.bad { color:var(--bad); }
+  .tries { display:inline-flex; gap:5px; margin-left:6px; vertical-align:middle; }
+  .tries i { width:10px; height:10px; border-radius:50%; background:var(--accent); display:inline-block; }
+  .tries i.used { background:var(--line); }
+  .answers { display:grid; gap:8px; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); }
+  .ans { text-align:left; border:1.5px solid var(--line); background:var(--card); border-radius:12px; padding:12px 14px; min-height:54px; }
+  .ans b { display:block; font-size:16px; }
+  .ans .frets { color:var(--mute); font-weight:400; font-size:13px; margin-left:4px; }
+  .ans .songs { color:var(--mute); font-size:13px; margin-top:4px; line-height:1.35; }
+  .ans .songs strong { color:var(--ink); font-weight:600; }
+  .hide-songs .songs { display:none; }
+  .ans.wrong { background:var(--badbg); border-color:var(--bad); opacity:.75; }
+  .ans.right { background:var(--goodbg); border-color:var(--good); }
+  .ans:disabled { cursor:default; }
+  .hint { color:var(--mute); font-size:14px; margin:10px 0 0; }
+  .result-big { font-size:40px; font-weight:800; margin:4px 0; }
+  table { width:100%; border-collapse:collapse; font-size:15px; }
+  td { padding:8px 4px; border-top:1px solid var(--line); }
+  td.r { text-align:right; font-weight:600; }
+  .ok { color:var(--good); } .no { color:var(--bad); }
+  [hidden] { display:none !important; }
+  @media (max-width:480px) {
+    .levels { grid-template-columns:1fr; }
+    .answers { grid-template-columns:1fr 1fr; }
+    .ans { padding:10px 11px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Interval Ear Trainer</h1>
+  <p class="sub">Listen to two notes, the first one then a higher one, and work out the jump between them.</p>
+
+  <!-- Start screen -->
+  <section id="start">
+    <div class="levels" id="levels"></div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <span>Song reminders under each interval</span>
+        <button class="pill" id="songToggleStart"></button>
+      </div>
+      <p class="hint">Each interval comes up once, in a random order. You get three tries at each one. There's no timer, so take as long as you like and replay as often as you need.</p>
+    </div>
+    <button class="big" id="go">Start the test</button>
+  </section>
+
+  <!-- Test screen -->
+  <section id="test" hidden>
+    <div class="top">
+      <span class="progress" id="progress"></span>
+      <div class="row">
+        <button class="pill" id="songToggle"></button>
+        <button class="pill" id="quit">Stop</button>
+      </div>
+    </div>
+    <div class="bar"><i id="barFill"></i></div>
+    <div class="play">
+      <button class="big" id="replay">▶ Play again</button>
+      <button class="big" id="next" hidden>Next →</button>
+    </div>
+    <div class="msg" id="msg"></div>
+    <div class="answers" id="answers"></div>
+    <p class="hint" id="compareHint" hidden>Tap any interval to hear it from the same starting note, so you can compare.</p>
+  </section>
+
+  <!-- Results screen -->
+  <section id="results" hidden>
+    <div class="card">
+      <div class="progress">Your score</div>
+      <div class="result-big" id="score"></div>
+      <div id="scoreNote" class="hint" style="margin-top:0"></div>
+    </div>
+    <div class="card"><table id="breakdown"></table></div>
+    <div class="row">
+      <button class="big" id="again">Try again</button>
+      <button class="ghost" id="home">Change level</button>
+    </div>
+  </section>
+</div>
+
+<script>
+// Songs are word for word from the "Hearing intervals" worksheet.
+const INTERVALS = [
+  { n:1,  name:"Minor 2nd",   songs:["<strong>Jaws</strong> theme", "<strong>The Pink Panther</strong> theme"] },
+  { n:2,  name:"Major 2nd",   songs:["<strong>Happy Birthday</strong> (on “py birth”)", "<strong>Frère Jacques</strong> (first two notes)"] },
+  { n:3,  name:"Minor 3rd",   songs:["<strong>Seven Nation Army</strong> (the riff)", "<strong>Greensleeves</strong>"] },
+  { n:4,  name:"Major 3rd",   songs:["<strong>Oh When the Saints</strong>", "<strong>Kumbaya</strong>"] },
+  { n:5,  name:"Perfect 4th", songs:["<strong>Harry Potter</strong> (Hedwig’s Theme)", "<strong>Here Comes the Bride</strong>"] },
+  { n:6,  name:"Tritone",     songs:["<strong>The Simpsons</strong> theme (on “The Simp-”)"] },
+  { n:7,  name:"Perfect 5th", songs:["<strong>Star Wars</strong> main theme", "<strong>Twinkle Twinkle Little Star</strong>"] },
+  { n:8,  name:"Minor 6th",   songs:["<strong>The Entertainer</strong> (the leap at the start)"] },
+  { n:9,  name:"Major 6th",   songs:["<strong>Jingle Bells</strong> (on “Dashing”)", "<strong>Sweet Caroline</strong> (the chorus, going down)", "<strong>Until I Found You</strong> (going down)"] },
+  { n:10, name:"Minor 7th",   songs:["<strong>Can’t Stop</strong> (first two notes of the riff)", "<strong>The Winner Takes It All</strong>"] },
+  { n:11, name:"Major 7th",   songs:["<strong>Take On Me</strong> (the chorus)"] },
+  { n:12, name:"Octave",      songs:["<strong>Somewhere Over the Rainbow</strong> (on “Some-where”)"] },
+];
+
+const LEVELS = [
+  { id:1, title:"Level 1", desc:"Minor 2nd up to a perfect 5th", set:[1,2,3,4,5,7] },
+  { id:2, title:"Level 2", desc:"Minor 2nd up to the octave",    set:[1,2,3,4,5,6,7,8,9,10,11,12] },
+];
+
+const TRIES = 3;
+const $ = id => document.getElementById(id);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("iet-" + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("iet-" + k, JSON.stringify(v)); } catch {} },
+};
+
+let level = LEVELS.find(l => l.id === store.get("level", 1)) || LEVELS[0];
+let showSongs = store.get("songs", true);
+let queue = [], qi = 0, root = 0, triesLeft = TRIES, done = false, results = [];
+
+// ---------- Sound: a plucked string (Karplus-Strong) ----------
+let ctx = null;
+const bufCache = new Map();
+function audio() {
+  if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+  if (ctx.state === "suspended") ctx.resume();
+  return ctx;
+}
+function pluck(midi) {
+  if (bufCache.has(midi)) return bufCache.get(midi);
+  const sr = ctx.sampleRate, dur = 2.2, len = Math.floor(sr * dur);
+  const freq = 440 * Math.pow(2, (midi - 69) / 12);
+  const period = sr / freq, N = Math.floor(period), frac = period - N;
+  const buf = ctx.createBuffer(1, len, sr), out = buf.getChannelData(0);
+  const line = new Float32Array(N + 2);
+  // Soften the initial burst so it sounds like a finger, not a pick
+  let prev = 0;
+  for (let i = 0; i < line.length; i++) { const r = Math.random() * 2 - 1; prev = prev * 0.5 + r * 0.5; line[i] = prev; }
+  const decay = midi < 52 ? 0.996 : 0.994;
+  let p = 0;
+  for (let i = 0; i < len; i++) {
+    const a = line[p], b = line[(p + 1) % line.length];
+    const s = a + (b - a) * frac;
+    out[i] = s;
+    line[p] = decay * 0.5 * (a + b);
+    p = (p + 1) % line.length;
+  }
+  // Short fade at the end to avoid a click
+  const fade = Math.floor(sr * 0.08);
+  for (let i = 0; i < fade; i++) out[len - 1 - i] *= i / fade;
+  bufCache.set(midi, buf);
+  return buf;
+}
+let playing = [];
+function stopAll() { playing.forEach(s => { try { s.stop(); } catch {} }); playing = []; }
+function playNote(midi, when) {
+  const src = ctx.createBufferSource(); src.buffer = pluck(midi);
+  const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 3200;
+  const g = ctx.createGain(); g.gain.value = 0.55;
+  src.connect(lp).connect(g).connect(ctx.destination);
+  src.start(when); playing.push(src);
+}
+function playInterval(semis) {
+  audio(); stopAll();
+  const t = ctx.currentTime + 0.05;
+  playNote(root, t);
+  playNote(root + semis, t + 1.0);
+}
+
+// ---------- Screens ----------
+function show(id) { ["start", "test", "results"].forEach(s => $(s).hidden = s !== id); }
+
+function renderLevels() {
+  $("levels").innerHTML = "";
+  LEVELS.forEach(l => {
+    const b = document.createElement("button");
+    b.className = "level" + (l === level ? " on" : "");
+    b.innerHTML = `<b>${l.title}</b><span>${l.desc} · ${l.set.length} intervals</span>`;
+    b.onclick = () => { level = l; store.set("level", l.id); renderLevels(); };
+    $("levels").appendChild(b);
+  });
+}
+
+function renderSongToggles() {
+  const label = showSongs ? "Hide songs" : "Show songs";
+  $("songToggleStart").textContent = label;
+  $("songToggle").textContent = label;
+  $("answers").classList.toggle("hide-songs", !showSongs);
+}
+function toggleSongs() { showSongs = !showSongs; store.set("songs", showSongs); renderSongToggles(); }
+
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+
+function startTest() {
+  audio();
+  queue = shuffle(level.set.slice());
+  qi = 0; results = [];
+  show("test");
+  renderAnswers();
+  nextQuestion();
+}
+
+function renderAnswers() {
+  $("answers").innerHTML = "";
+  level.set.forEach(n => {
+    const iv = INTERVALS.find(i => i.n === n);
+    const b = document.createElement("button");
+    b.className = "ans"; b.dataset.n = n;
+    b.innerHTML = `<b>${iv.name}<span class="frets">${n} fret${n > 1 ? "s" : ""}</span></b><div class="songs">${iv.songs.join("<br>")}</div>`;
+    b.onclick = () => answer(n, b);
+    $("answers").appendChild(b);
+  });
+  renderSongToggles();
+}
+
+function nextQuestion() {
+  if (qi >= queue.length) return finish();
+  // Root somewhere from A2 to C4, so even an octave stays in a comfy guitar range
+  root = 45 + Math.floor(Math.random() * 16);
+  triesLeft = TRIES; done = false;
+  document.querySelectorAll(".ans").forEach(b => { b.className = "ans"; b.disabled = false; });
+  $("next").hidden = true; $("compareHint").hidden = true;
+  $("progress").textContent = `Question ${qi + 1} of ${queue.length}`;
+  $("barFill").style.width = (qi / queue.length * 100) + "%";
+  setMsg("", "Which interval is it?");
+  playInterval(queue[qi]);
+}
+
+function setMsg(cls, html) { $("msg").className = "msg " + cls; $("msg").innerHTML = html; }
+function dots() { let h = '<span class="tries">'; for (let i = 0; i < TRIES; i++) h += `<i class="${i < triesLeft ? "" : "used"}"></i>`; return h + "</span>"; }
+
+function answer(n, btn) {
+  const target = queue[qi];
+  if (done) { playInterval(n); return; } // compare mode once the question is over
+  if (n === target) {
+    btn.classList.add("right");
+    results.push({ n: target, tries: TRIES - triesLeft + 1 });
+    endQuestion("good", `Yes, that's a ${name(target)}!`);
+    return;
+  }
+  triesLeft--;
+  btn.classList.add("wrong"); btn.disabled = true;
+  if (triesLeft > 0) {
+    setMsg("bad", `Not quite. ${triesLeft} more ${triesLeft === 1 ? "try" : "tries"}. ${dots()}`);
+    playInterval(target);
+  } else {
+    document.querySelector(`.ans[data-n="${target}"]`).classList.add("right");
+    results.push({ n: target, tries: 0 });
+    endQuestion("bad", `It was a ${name(target)}. Listen again…`);
+    playInterval(target);
+  }
+}
+
+function endQuestion(cls, text) {
+  done = true;
+  setMsg(cls, text);
+  document.querySelectorAll(".ans").forEach(b => b.disabled = false);
+  $("next").hidden = false; $("compareHint").hidden = false;
+  $("next").textContent = qi + 1 >= queue.length ? "See my score →" : "Next →";
+}
+
+function name(n) { return INTERVALS.find(i => i.n === n).name; }
+
+function finish() {
+  stopAll();
+  $("barFill").style.width = "100%";
+  const first = results.filter(r => r.tries === 1).length;
+  const got = results.filter(r => r.tries > 0).length;
+  $("score").textContent = `${got} / ${results.length}`;
+  $("scoreNote").textContent = `${first} first time, ${got - first} after another try, ${results.length - got} to keep working on.`;
+  const rows = INTERVALS.filter(i => level.set.includes(i.n)).map(i => {
+    const r = results.find(x => x.n === i.n);
+    const txt = r.tries === 0 ? '<span class="no">Missed</span>'
+      : r.tries === 1 ? '<span class="ok">First try</span>'
+      : `<span class="ok">Try ${r.tries}</span>`;
+    return `<tr><td>${i.name}</td><td class="r">${txt}</td></tr>`;
+  });
+  $("breakdown").innerHTML = rows.join("");
+  show("results");
+}
+
+// ---------- Wire up ----------
+$("go").onclick = startTest;
+$("again").onclick = startTest;
+$("home").onclick = () => { renderLevels(); show("start"); };
+$("quit").onclick = () => { stopAll(); renderLevels(); show("start"); };
+$("replay").onclick = () => playInterval(queue[qi]);
+$("next").onclick = () => { qi++; nextQuestion(); };
+$("songToggleStart").onclick = toggleSongs;
+$("songToggle").onclick = toggleSongs;
+renderLevels();
+renderSongToggles();
+</script>
+</body>
+</html>
