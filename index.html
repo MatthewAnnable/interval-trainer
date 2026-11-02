@@ -62,15 +62,19 @@
   .ok { color:var(--good); } .no { color:var(--bad); }
   .tabs { display:flex; gap:8px; margin:0 0 14px; }
   .lickbtns { display:flex; gap:10px; flex-wrap:wrap; }
-  .rec { background:var(--bad); }
-  .heard { display:inline-flex; gap:6px; margin-left:8px; vertical-align:middle; }
-  .heard i { width:12px; height:12px; border-radius:50%; border:2px solid var(--bad); display:inline-block; }
-  .heard i.on { background:var(--bad); }
-  pre.tab { font:15px/1.3 ui-monospace,Menlo,Consolas,monospace; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 12px; overflow-x:auto; margin:8px 0; }
-  pre.tab .ok { color:var(--good); font-weight:700; }
-  pre.tab .no { color:var(--bad); font-weight:700; }
-  pre.tab .hit { color:var(--accent); font-weight:700; }
-  .tablabel { color:var(--mute); font-size:14px; margin-top:12px; }
+  .count { font-size:34px; font-weight:800; color:var(--accent); }
+  .notation { width:100%; max-width:460px; display:block; margin:6px 0; }
+  .notation .ln { stroke:var(--mute); stroke-width:1; }
+  .notation .bar { stroke:var(--ink); stroke-width:1.5; }
+  .notation .ink { fill:var(--ink); stroke:var(--ink); }
+  .notation .hollow { fill:none; stroke:var(--ink); stroke-width:1.6; }
+  .notation text { fill:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+  .notation .lbl { fill:var(--mute); font-size:12px; }
+  .notation .fret { font-weight:700; font-size:14px; fill:var(--accent); }
+  .notation .mask { fill:var(--card); }
+  .good-btn { background:var(--good); }
+  .bad-btn { background:var(--bad); }
+  .tablabel { color:var(--mute); font-size:14px; margin-bottom:4px; }
   .box { border-collapse:collapse; margin:6px 0 2px; }
   .box td { width:52px; height:30px; text-align:center; border-left:2px solid var(--line); padding:0; position:relative; }
   .box td::before { content:""; position:absolute; left:0; right:0; top:50%; border-top:1.5px solid var(--mute); opacity:.5; }
@@ -154,14 +158,20 @@
 </div>
 
 <div id="licksApp" hidden>
-  <p class="sub">The app plays a short lick from the A minor pentatonic box (frets 5 to 8), starting on an A. Work it out on your guitar, then press Record and play it.</p>
+  <p class="sub">The app plays a one-bar lick from the A minor pentatonic box (frets 5 to 8), starting on an A. Work it out on your guitar, play along with it to check, then reveal it and mark yourself.</p>
 
   <section id="lStart">
     <div class="levels" id="lLevels"></div>
     <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <span>Speed</span>
+        <div class="row" id="lTempos"></div>
+      </div>
+    </div>
+    <div class="card">
       <div>The box: every note the licks use. The As are filled in.</div>
       <table class="box" id="boxChart"></table>
-      <p class="hint">Five licks per round, three tries at each, and replay as often as you like. No timer. Use the guitar on its own, not through an amp with effects, somewhere fairly quiet.</p>
+      <p class="hint">Five licks per round. Listen as often as you like, and press Play along to try it with the app after a count of four. When you think you've got it, reveal it and mark yourself honestly. No timer.</p>
     </div>
     <button class="big" id="lGo">Start</button>
   </section>
@@ -173,18 +183,25 @@
     </div>
     <div class="bar"><i id="lBar"></i></div>
     <div class="lickbtns">
-      <button class="big" id="lPlay">▶ Play lick</button>
-      <button class="big rec" id="lRec">● Record my try</button>
-      <button class="big" id="lNext" hidden>Next →</button>
+      <button class="big" id="lPlay">▶ Listen</button>
+      <button class="big" id="lAlong">🎸 Play along</button>
+      <button class="ghost" id="lReveal">I think I've got it</button>
     </div>
     <div class="msg" id="lMsg"></div>
-    <div id="lAttempt"></div>
-    <div id="lAnswer"></div>
+    <div class="card" id="lAnswer" hidden>
+      <div class="tablabel">The lick</div>
+      <div id="lNotation"></div>
+      <div style="margin-top:10px;font-weight:600">Did you get it?</div>
+      <div class="row" style="margin-top:8px">
+        <button class="big good-btn" id="lYes">✓ Yes</button>
+        <button class="big bad-btn" id="lNo">✗ Not quite</button>
+      </div>
+    </div>
   </section>
 
   <section id="lResults" hidden>
     <div class="card">
-      <div class="progress">Your score</div>
+      <div class="progress">You marked</div>
       <div class="result-big" id="lScore"></div>
       <div id="lScoreNote" class="hint" style="margin-top:0"></div>
     </div>
@@ -473,55 +490,100 @@ renderSongToggles();
 // ================= Pentatonic licks =================
 // Box 1 of A minor pentatonic, frets 5–8. In this box every pitch has exactly one
 // place, so a MIDI note number is enough to know the string and fret.
+// (Listening through the mic and marking was tried on 02/11/2026 and misheard too
+// often on a real guitar, so students play along and mark themselves instead.)
 const BOX = [ // [midi, string, fret], low to high
   [45,6,5],[48,6,8],[50,5,5],[52,5,7],[55,4,5],[57,4,7],
   [60,3,5],[62,3,7],[64,2,5],[67,2,8],[69,1,5],[72,1,8],
 ];
 const BOX_MIDI = BOX.map(b => b[0]);
 const ROOTS = [0, 5, 10];               // indexes of the three As
-const OPEN = {1:64, 2:59, 3:55, 4:50, 5:45, 6:40};
 const NAMES = ["C","C#","D","Eb","E","F","F#","G","Ab","A","Bb","B"];
 const LICK_LEVELS = [3, 4, 5, 6];
 const SPREAD = {3:3, 4:4, 5:5, 6:11};  // how far (in box notes) a lick may stray from its starting A
-const LICKS_PER_ROUND = 5, NOTE_GAP = 0.55;
+const TEMPOS = [60, 75, 90];
+const LICKS_PER_ROUND = 5;
 
 let lLen = store.get("lickLen", 3);
-let licks = [], li = 0, lTries = TRIES, lDone = false, lResults = [];
+let bpm = TEMPOS.includes(store.get("bpm", 60)) ? store.get("bpm", 60) : 60;
+let licks = [], li = 0, lResults = [], timers = [];
+
+// One bar of 4/4 from crotchets and quaver pairs, so it can be written with just
+// those. [crotchets, quaver pairs, empty beats] for each length; empty beats at the
+// end lengthen a final crotchet into a minim, dotted minim or semibreve, or stay
+// as crotchet rests after quavers.
+const SHAPES = {
+  3: [[3,0,1], [1,1,2]],
+  4: [[4,0,0], [2,1,1], [0,2,2]],
+  5: [[3,1,0], [1,2,1]],
+  6: [[2,2,0], [0,3,1]],
+};
+function makeRhythm(n) {
+  const [c, q, rest] = SHAPES[n][Math.floor(Math.random() * SHAPES[n].length)];
+  const beats = shuffle([...Array(c).fill("C"), ...Array(q).fill("Q")]);
+  const ev = [], rests = [];
+  beats.forEach((kind, b) => {
+    if (kind === "C") ev.push({ start:b, dur:1 });
+    else ev.push({ start:b, dur:0.5 }, { start:b + 0.5, dur:0.5 });
+  });
+  if (rest) {
+    const last = ev[ev.length - 1];
+    if (last.dur === 1) last.dur += rest;
+    else for (let b = beats.length; b < 4; b++) rests.push(b);
+  }
+  return { ev, rests };
+}
 
 function makeLick(len) {
   const s = ROOTS[Math.floor(Math.random() * ROOTS.length)];
   const lo = Math.max(0, s - SPREAD[len]), hi = Math.min(BOX.length - 1, s + SPREAD[len]);
   const steps = [-3, -2, -2, -1, -1, -1, -1, 1, 1, 1, 1, 2, 2, 3];
-  const out = [s];
-  while (out.length < len) {
-    const n = out[out.length - 1] + steps[Math.floor(Math.random() * steps.length)];
-    if (n >= lo && n <= hi) out.push(n);
+  const idx = [s];
+  while (idx.length < len) {
+    const n = idx[idx.length - 1] + steps[Math.floor(Math.random() * steps.length)];
+    if (n >= lo && n <= hi) idx.push(n);
   }
-  return out.map(i => BOX_MIDI[i]);
+  const { ev, rests } = makeRhythm(len);
+  ev.forEach((e, i) => e.midi = BOX_MIDI[idx[i]]);
+  return { ev, rests };
 }
 
-function placeOf(midi) {
-  const b = BOX.find(x => x[0] === midi);
-  if (b) return [b[1], b[2]];
-  // Outside the box: whichever string puts it nearest the box's frets
-  let best = null;
-  for (let st = 1; st <= 6; st++) {
-    const f = midi - OPEN[st];
-    if (f >= 0 && (!best || Math.abs(f - 6.5) < Math.abs(best[1] - 6.5))) best = [st, f];
-  }
-  return best;
-}
-
-// Tab as text; cls[i] colours note i
-function tabHtml(notes, cls) {
-  const lines = {1:"e|-", 2:"B|-", 3:"G|-", 4:"D|-", 5:"A|-", 6:"E|-"};
-  notes.forEach((m, i) => {
-    const [st, f] = placeOf(m);
-    for (let k = 1; k <= 6; k++) {
-      lines[k] += k === st ? `<span class="${cls[i] || ""}">${String(f).padEnd(2, "-")}</span>-` : "---";
+// Rhythm on one line above the tab, each note directly over its fret number
+function notationSvg(lick) {
+  const L = 52, BW = 64, W = L + 4 * BW + 8, RY = 40, T0 = 84, TS = 16, H = T0 + 5 * TS + 12;
+  const x = start => L + start * BW + 16;
+  let h = `<svg class="notation" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
+  // rhythm line, time signature, barlines
+  h += `<line class="ln" x1="${L - 10}" y1="${RY}" x2="${L + 4 * BW}" y2="${RY}"/>`;
+  h += `<text x="${L - 26}" y="${RY - 3}" font-size="17" font-weight="800" text-anchor="middle">4</text><text x="${L - 26}" y="${RY + 15}" font-size="17" font-weight="800" text-anchor="middle">4</text>`;
+  h += `<line class="bar" x1="${L + 4 * BW}" y1="${RY - 12}" x2="${L + 4 * BW}" y2="${RY + 12}"/>`;
+  lick.ev.forEach((e, i) => {
+    const cx = x(e.start), filled = e.dur < 2;
+    h += `<ellipse cx="${cx}" cy="${RY}" rx="6.5" ry="4.6" transform="rotate(-20 ${cx} ${RY})" class="${filled ? "ink" : "hollow"}"/>`;
+    if (e.dur < 4) h += `<line class="bar" x1="${cx + 6}" y1="${RY - 1}" x2="${cx + 6}" y2="${RY - 30}"/>`;
+    if (e.dur === 3) h += `<circle class="ink" cx="${cx + 12}" cy="${RY}" r="2"/>`;
+    // beam a quaver pair (the first quaver of each beat)
+    if (e.dur === 0.5 && e.start % 1 === 0) {
+      const x2 = x(e.start + 0.5);
+      h += `<rect class="ink" x="${cx + 5.25}" y="${RY - 31}" width="${x2 - cx + 1.5}" height="5"/>`;
     }
   });
-  return `<pre class="tab">${[1,2,3,4,5,6].map(k => lines[k] + "|").join("\n")}</pre>`;
+  lick.rests.forEach(b => {
+    const rx = x(b);
+    h += `<path class="hollow" stroke-width="3.2" stroke-linejoin="round" d="M${rx - 2} ${RY - 13} l5 6 l-5 5 l5 6 c-5 -2 -7 2 -3 6"/>`;
+  });
+  // tab
+  const names = ["e","B","G","D","A","E"];
+  for (let k = 0; k < 6; k++) {
+    const y = T0 + k * TS;
+    h += `<line class="ln" x1="${L - 10}" y1="${y}" x2="${L + 4 * BW}" y2="${y}"/><text class="lbl" x="${L - 20}" y="${y + 4}" text-anchor="middle">${names[k]}</text>`;
+  }
+  h += `<line class="bar" x1="${L - 10}" y1="${T0}" x2="${L - 10}" y2="${T0 + 5 * TS}"/><line class="bar" x1="${L + 4 * BW}" y1="${T0}" x2="${L + 4 * BW}" y2="${T0 + 5 * TS}"/>`;
+  lick.ev.forEach(e => {
+    const b = BOX.find(z => z[0] === e.midi), y = T0 + (b[1] - 1) * TS, cx = x(e.start);
+    h += `<rect class="mask" x="${cx - 8}" y="${y - 8}" width="16" height="16"/><text class="fret" x="${cx}" y="${y + 5}" text-anchor="middle">${b[2]}</text>`;
+  });
+  return h + "</svg>";
 }
 
 function renderBoxChart() {
@@ -547,266 +609,95 @@ function renderLickLevels() {
     b.onclick = () => { lLen = n; store.set("lickLen", n); renderLickLevels(); };
     $("lLevels").appendChild(b);
   });
-}
-
-function lShow(id) { ["lStart", "lTest", "lResults"].forEach(s => $(s).hidden = s !== id); }
-
-function playLick() {
-  audio(); stopAll(); stopListening();
-  const t = ctx.currentTime + 0.05;
-  let prev = null;
-  licks[li].forEach((m, i) => {
-    const at = t + i * NOTE_GAP;
-    if (prev) { prev.gain.setValueAtTime(0.55, at - 0.04); prev.gain.linearRampToValueAtTime(0, at); }
-    prev = playNote(m, at);
+  $("lTempos").innerHTML = "";
+  TEMPOS.forEach(t => {
+    const b = document.createElement("button");
+    b.className = "pill" + (t === bpm ? " on" : "");
+    b.textContent = `${t} bpm`;
+    b.onclick = () => { bpm = t; store.set("bpm", t); renderLickLevels(); };
+    $("lTempos").appendChild(b);
   });
 }
 
+function lShow(id) { ["lStart", "lTest", "lResults"].forEach(s => $(s).hidden = s !== id); }
+function lMsg(cls, html) { $("lMsg").className = "msg " + cls; $("lMsg").innerHTML = html; }
+
+// ---------- Sound ----------
+function stopLick() { stopAll(); timers.forEach(clearTimeout); timers = []; }
+function click(at, accent) {
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.frequency.value = accent ? 1600 : 1100;
+  g.gain.setValueAtTime(0.0001, at);
+  g.gain.exponentialRampToValueAtTime(accent ? 0.35 : 0.22, at + 0.003);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + 0.05);
+  o.connect(g).connect(ctx.destination);
+  o.start(at); o.stop(at + 0.06); playing.push(o);
+}
+const later = (sec, fn) => timers.push(setTimeout(fn, Math.max(0, sec * 1000)));
+
+// With a count-in, four clicks come first and the count shows on screen.
+// The metronome keeps clicking through the bar either way.
+function playLick(countIn) {
+  audio(); stopLick();
+  const beat = 60 / bpm, now = ctx.currentTime, t0 = now + 0.1;
+  const start = countIn ? t0 + 4 * beat : t0;
+  if (countIn) for (let i = 0; i < 4; i++) {
+    click(t0 + i * beat, i === 0);
+    later(t0 + i * beat - now, () => lMsg("", `<span class="count">${i + 1}</span>`));
+  }
+  for (let b = 0; b < 4; b++) click(start + b * beat, b === 0);
+  later(start - now, () => lMsg("", countIn ? "Play!" : "Listen…"));
+  const lick = licks[li];
+  let prev = null;
+  lick.ev.forEach(e => {
+    const at = start + e.start * beat;
+    if (prev) { prev.gain.setValueAtTime(0.55, at - 0.03); prev.gain.linearRampToValueAtTime(0, at); }
+    prev = playNote(e.midi, at);
+  });
+  const end = start + 4 * beat;
+  prev.gain.setValueAtTime(0.55, end - 0.05); prev.gain.linearRampToValueAtTime(0, end);
+  later(end - now, () => lMsg("", $("lAnswer").hidden
+    ? "Listen again, play along, or reveal it when you think you've got it."
+    : ""));
+}
+
+// ---------- Flow ----------
 function lStartRound() {
   audio();
   licks = Array.from({ length: LICKS_PER_ROUND }, () => makeLick(lLen));
   li = 0; lResults = [];
   lShow("lTest");
-  ensureMic(); // open early, so Safari's settling time passes while they work it out
   lNextLick();
 }
 
 function lNextLick() {
   if (li >= licks.length) return lFinish();
-  lTries = TRIES; lDone = false;
   $("lProgress").textContent = `Lick ${li + 1} of ${licks.length}`;
   $("lBar").style.width = (li / licks.length * 100) + "%";
-  $("lAttempt").innerHTML = ""; $("lAnswer").innerHTML = "";
-  $("lNext").hidden = true; $("lRec").hidden = false;
-  lMsg("", "Listen, work it out, then press Record.");
-  playLick();
+  $("lAnswer").hidden = true; $("lReveal").hidden = false;
+  playLick(false);
 }
 
-function lMsg(cls, html) { $("lMsg").className = "msg " + cls; $("lMsg").innerHTML = html; }
-function lDots() { let h = '<span class="tries">'; for (let i = 0; i < TRIES; i++) h += `<i class="${i < lTries ? "" : "used"}"></i>`; return h + "</span>"; }
-
-function judge(heard) {
-  const target = licks[li], N = target.length;
-  if (heard.length < N) {
-    lMsg("bad", heard.length
-      ? `I only heard ${heard.length} of the ${N} notes. Have another go. That one didn't count.`
-      : `I didn't hear anything. Check the mic is allowed, play a little louder, and try again.`);
-    return;
-  }
-  const cls = heard.map((m, i) => m === target[i] ? "ok" : "no");
-  const right = cls.filter(c => c === "ok").length;
-  $("lAttempt").innerHTML = `<div class="tablabel">What you played</div>${tabHtml(heard, cls)}`;
-  if (right === N) {
-    lResults.push(TRIES - lTries + 1);
-    lMsg("good", "Yes, that's the lick!");
-    return lEnd(false);
-  }
-  lTries--;
-  if (lTries > 0) {
-    lMsg("bad", `${right} of ${N} notes right. ${lTries} more ${lTries === 1 ? "try" : "tries"}. ${lDots()}`);
-  } else {
-    lResults.push(0);
-    lMsg("bad", `${right} of ${N} right. Here's how it goes. Listen again…`);
-    lEnd(true);
-    playLick();
-  }
+function lReveal() {
+  $("lNotation").innerHTML = notationSvg(licks[li]);
+  $("lAnswer").hidden = false; $("lReveal").hidden = true;
+  playLick(false);
 }
 
-function lEnd(showLick) {
-  lDone = true;
-  if (showLick) $("lAnswer").innerHTML = `<div class="tablabel">The lick</div>${tabHtml(licks[li], licks[li].map(() => "hit"))}`;
-  $("lRec").hidden = true; $("lNext").hidden = false;
-  $("lNext").textContent = li + 1 >= licks.length ? "See my score →" : "Next →";
+function lMark(got) {
+  lResults.push(got);
+  li++;
+  lNextLick();
 }
 
 function lFinish() {
-  stopAll(); stopListening();
-  const got = lResults.filter(t => t > 0).length, first = lResults.filter(t => t === 1).length;
+  stopLick();
+  const got = lResults.filter(Boolean).length;
   $("lScore").textContent = `${got} / ${lResults.length}`;
-  $("lScoreNote").textContent = `${first} first time, ${got - first} after another try, ${lResults.length - got} to keep working on.`;
+  $("lScoreNote").textContent = got === lResults.length ? "All of them. Try more notes or a faster speed next."
+    : got ? `${lResults.length - got} to keep working on. Have another round.`
+    : "Those were hard ones. Try fewer notes or a slower speed.";
   lShow("lResults");
-}
-
-// ---------- Listening ----------
-// Same pitch detector as the Classical Note Trainer and the singing ladder
-// (McLeod normalised square difference), with the range set for guitar.
-const F_MIN = 70, F_MAX = 1100;
-function detectPitch(buf, sr) {
-  const n = buf.length, maxTau = Math.min(n >> 1, Math.floor(sr / F_MIN)), minTau = Math.floor(sr / F_MAX);
-  const nsdf = new Float32Array(maxTau);
-  let sq = 0; for (let i = 0; i < n; i++) sq += buf[i] * buf[i];
-  let m = 2 * sq;
-  for (let tau = 0; tau < maxTau; tau++) {
-    let acf = 0;
-    for (let i = 0; i < n - tau; i++) acf += buf[i] * buf[i + tau];
-    nsdf[tau] = m > 0 ? 2 * acf / m : 0;
-    m -= buf[tau] * buf[tau] + buf[n - 1 - tau] * buf[n - 1 - tau];
-  }
-  const peaks = [];
-  let tau = 1;
-  while (tau < maxTau - 1 && nsdf[tau] > 0) tau++;
-  while (tau < maxTau - 1) {
-    while (tau < maxTau - 1 && nsdf[tau] <= 0) tau++;
-    let best = -1;
-    while (tau < maxTau - 1 && nsdf[tau] > 0) {
-      if (best < 0 || nsdf[tau] > nsdf[best]) best = tau;
-      tau++;
-    }
-    if (best > 0 && best >= minTau && nsdf[best] > nsdf[best - 1] && nsdf[best] >= nsdf[best + 1]) peaks.push(best);
-  }
-  if (!peaks.length) return null;
-  let maxVal = 0; for (const p of peaks) maxVal = Math.max(maxVal, nsdf[p]);
-  const pick = peaks.find(p => nsdf[p] >= 0.9 * maxVal);
-  const a = nsdf[pick - 1], b = nsdf[pick], c = nsdf[pick + 1];
-  const shift = (a - c) / (2 * (a - 2 * b + c) || 1);
-  return { freq: sr / (pick + shift), clarity: b };
-}
-
-// Safari (and every iPhone browser) runs the mic about 5% fast for up to ~20s after
-// it opens, which reads nearly a semitone sharp. Measured in the singing ladder,
-// 30/10/2026. The mic opens when a round starts, so this has usually passed by the
-// first Record.
-const isWebKit = /Safari/.test(navigator.userAgent) && !/Chrome|Chromium|Edg/.test(navigator.userAgent);
-const MIC_SETTLE = 20000;
-let mic = null, micSource = null, micBuf = null, micOpenedAt = 0, listenTimer = null;
-async function ensureMic() {
-  audio();
-  if (mic) return true;
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    lMsg("bad", "This browser can't reach the microphone. Try Chrome or Safari."); return false;
-  }
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation:false, noiseSuppression:false, autoGainControl:false } });
-    mic = ctx.createAnalyser(); mic.fftSize = 2048;
-    micSource = ctx.createMediaStreamSource(stream);
-    micSource.connect(mic);
-    micBuf = new Float32Array(mic.fftSize);
-    micOpenedAt = performance.now();
-    return true;
-  } catch (e) {
-    lMsg("bad", "I couldn't use the microphone. Allow it in the browser settings and try again."); return false;
-  }
-}
-const wait = ms => new Promise(r => setTimeout(r, ms));
-function rmsNow() { mic.getFloatTimeDomainData(micBuf); let s = 0; for (const v of micBuf) s += v * v; return Math.sqrt(s / micBuf.length); }
-function stopListening() { if (listenTimer) { clearInterval(listenTimer); listenTimer = null; } $("lRec").textContent = "● Record my try"; }
-
-async function record() {
-  if (listenTimer) { finishListening(true); return; }
-  if (!(await ensureMic())) return;
-  stopAll();
-  $("lPlay").disabled = true; $("lRec").disabled = true;
-  if (isWebKit) {
-    while (performance.now() - micOpenedAt < MIC_SETTLE) {
-      lMsg("", `Mic warming up… ${Math.ceil((MIC_SETTLE - (performance.now() - micOpenedAt)) / 1000)}s (Safari needs a moment)`);
-      await wait(250);
-    }
-  }
-  // A moment of quiet to learn how noisy the room is
-  lMsg("", "Shh… listening to the room");
-  // (median, and capped, so a string still ringing doesn't make it deaf)
-  const amb = [];
-  for (let i = 0; i < 12; i++) { amb.push(rmsNow()); await wait(25); }
-  amb.sort((a, b) => a - b);
-  const gate = Math.min(0.012, Math.max(0.004, amb[6] * 3));
-  listen(gate, amb[6]);
-}
-
-// Guitarists let notes ring into each other, and a ringing low string swamps a
-// one-note pitch detector. So each note is found from what is *new* in the sound:
-// a pluck shows as a jump in level or as new frequencies appearing, and ~130ms later the spectrum is compared with
-// the one just before the pluck. Whatever got louder is the new note; old notes
-// only fade, so they drop out. Each candidate note is scored by its harmonics in
-// that difference (1/√h weights, so neither a weak fundamental nor a sub-octave
-// fools it), and the one-note detector settles octaves when it agrees.
-// Every note has to be plucked: a hammer-on or slide may not be heard.
-const CANDS = []; for (let m = 40; m <= 79; m++) CANDS.push(m);
-const hz = m => 440 * Math.pow(2, (m - 69) / 12);
-function bestNote(flux, binHz) {
-  const at = f => { const k = Math.round(f / binHz); return Math.max(flux[k - 1] || 0, flux[k] || 0, flux[k + 1] || 0); };
-  const scores = CANDS.map(m => {
-    let sc = 0;
-    for (let h = 1; h <= 10; h++) {
-      const f = hz(m) * h; if (f > 5000) break;
-      sc += at(f) / Math.sqrt(h);
-    }
-    if (BOX_MIDI.includes(m)) sc *= 1.1;
-    return sc;
-  });
-  const top = Math.max(...scores);
-  if (top <= 0) return null;
-  let pick = CANDS[scores.indexOf(top)];
-  // Let the one-note detector pick when it names a note the spectrum also rates
-  const p = detectPitch(micBuf, ctx.sampleRate);
-  if (p && p.clarity > 0.9) {
-    const m = Math.round(69 + 12 * Math.log2(p.freq / 440)), i = CANDS.indexOf(m);
-    if (i >= 0 && scores[i] >= 0.7 * top) pick = m;
-  }
-  // An overtone can win when the real note's lower harmonics are weak. A note an
-  // octave, an octave and a fifth, or two octaves below is the real one if it has
-  // energy of its own: harmonics the picked note doesn't share.
-  const shared = [1, 2, 3, 4].reduce((a, k) => a + at(hz(pick) * k) / Math.sqrt(k), 0);
-  for (const [down, ratio] of [[31, 6], [28, 5], [24, 4], [19, 3], [12, 2]]) {
-    const sub = pick - down; if (sub < CANDS[0]) continue;
-    let own = 0;
-    for (let h = 1; h <= 8; h++) if (h % ratio) own += at(hz(sub) * h) / Math.sqrt(h);
-    if (own >= 0.25 * shared) return sub;
-  }
-  return pick;
-}
-
-let heard = [], heardAt = 0, spec = null, specBuf = null;
-function listen(gate, startLevel) {
-  const N = licks[li].length, t0 = performance.now();
-  if (!spec) {
-    spec = ctx.createAnalyser(); spec.fftSize = 8192; spec.smoothingTimeConstant = 0;
-    micSource.connect(spec);
-    specBuf = new Float32Array(spec.frequencyBinCount);
-  }
-  const binHz = ctx.sampleRate / spec.fftSize;
-  heard = []; heardAt = 0;
-  const levels = [startLevel, startLevel, startLevel, startLevel], hist = [], pending = [];
-  // A quieter note after a louder one doesn't raise the level, but it does bring
-  // frequencies that weren't there 40ms ago
-  mic.smoothingTimeConstant = 0;
-  const small = new Float32Array(mic.frequencyBinCount), smallHist = [];
-  let lastOnset = -1e9;
-  $("lPlay").disabled = false; $("lRec").disabled = false;
-  $("lRec").textContent = "■ Stop";
-  const show = () => lMsg("", `<span style="color:var(--bad)">● Listening</span>: play the lick <span class="heard">${Array.from({ length: N }, (_, i) => `<i class="${i < heard.length ? "on" : ""}"></i>`).join("")}</span>`);
-  show();
-  listenTimer = setInterval(() => {
-    const now = performance.now();
-    const rms = rmsNow();
-    spec.getFloatFrequencyData(specBuf);
-    const lin = specBuf.map(db => Math.pow(10, db / 20));
-    hist.push(lin); if (hist.length > 12) hist.shift();
-    const before = levels.shift(); levels.push(rms);
-    mic.getFloatFrequencyData(small);
-    const sm = small.map(db => Math.pow(10, db / 20));
-    smallHist.push(sm); if (smallHist.length > 3) smallHist.shift();
-    let rise = 0, total = 0;
-    if (smallHist.length === 3) for (let k = 2; k < sm.length / 4; k++) { rise += Math.max(0, sm[k] - smallHist[0][k]); total += sm[k]; }
-    const fresh = total > 0 ? rise / total : 0;
-    if (rms > gate && (rms > before * 1.35 || fresh > 0.3) && now - lastOnset > 120) {
-      lastOnset = now;
-      pending.push({ at: now + 130, base: hist[Math.max(0, hist.length - 3)] });
-    }
-    while (pending.length && now >= pending[0].at && heard.length < N) {
-      const { base } = pending.shift();
-      const flux = lin.map((v, k) => Math.max(0, v - base[k]));
-      const m = bestNote(flux, binHz);
-      if (m !== null) { heard.push(m); heardAt = now; show(); }
-    }
-    if (heard.length >= N) finishListening(false, 150);
-    else if (heard.length && !pending.length && now - heardAt > 4000) finishListening(false);
-    else if (now - t0 > 30000) finishListening(false);
-  }, 20);
-}
-function finishListening(manual, delay = 0) {
-  if (!listenTimer) return;
-  stopListening();
-  setTimeout(() => judge(heard.slice(0, licks[li].length)), delay);
 }
 
 // ---------- Tabs between the two trainers ----------
@@ -815,16 +706,18 @@ function setTab(t) {
   document.querySelectorAll(".tabs .pill").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
   $("intervalsApp").hidden = t !== "intervals";
   $("licksApp").hidden = t !== "licks";
-  stopAll(); stopListening();
+  stopLick();
 }
 document.querySelectorAll(".tabs .pill").forEach(b => b.onclick = () => setTab(b.dataset.tab));
 $("lGo").onclick = lStartRound;
 $("lAgain").onclick = lStartRound;
 $("lHome").onclick = () => { renderLickLevels(); lShow("lStart"); };
-$("lQuit").onclick = () => { stopAll(); stopListening(); renderLickLevels(); lShow("lStart"); };
-$("lPlay").onclick = playLick;
-$("lRec").onclick = record;
-$("lNext").onclick = () => { li++; lNextLick(); };
+$("lQuit").onclick = () => { stopLick(); renderLickLevels(); lShow("lStart"); };
+$("lPlay").onclick = () => playLick(false);
+$("lAlong").onclick = () => playLick(true);
+$("lReveal").onclick = lReveal;
+$("lYes").onclick = () => lMark(true);
+$("lNo").onclick = () => lMark(false);
 renderLickLevels();
 renderBoxChart();
 setTab(store.get("tab", "intervals"));
