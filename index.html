@@ -112,21 +112,10 @@
     <div class="levels" id="levels"></div>
     <div class="card">
       <div class="row" style="justify-content:space-between">
-        <span>Test type</span>
-        <div class="row" id="modes"></div>
-      </div>
-      <div class="row" id="dirRow" style="justify-content:space-between;margin-top:12px">
-        <span>Direction</span>
-        <div class="row" id="dirs"></div>
-      </div>
-      <p class="hint" id="modeHint"></p>
-    </div>
-    <div class="card">
-      <div class="row" style="justify-content:space-between">
         <span>Song reminders under each interval</span>
         <button class="pill" id="songToggleStart"></button>
       </div>
-      <p class="hint">You get three tries at each one. There's no timer, so take as long as you like and replay as often as you need.</p>
+      <p class="hint" id="startHint"></p>
     </div>
     <button class="big" id="go">Start the test</button>
   </section>
@@ -240,32 +229,20 @@ const INTERVALS = [
   { n:12, name:"Octave",      songs:["<strong>Somewhere Over the Rainbow</strong> (on “Some-where”)"] },
 ];
 
+// One numbered path, easiest first, with no other settings to choose (Matthew, 03/11/2026).
 // Levels 3 and 4 play three notes in a key. Both answers are measured from the
 // first note (always the tonic), and the student taps them in the order heard.
 const LEVELS = [
-  { id:1, title:"Level 1", desc:"Two notes: minor 2nd up to a perfect 5th", set:[1,2,3,4,5,7] },
-  { id:2, title:"Level 2", desc:"Two notes: minor 2nd up to the octave",    set:[1,2,3,4,5,6,7,8,9,10,11,12] },
+  { id:1, title:"Level 1", desc:"Two notes going up: minor 2nd to perfect 5th", dir:"up", set:[1,2,3,4,5,7] },
+  { id:2, title:"Level 2", desc:"Two notes going up: minor 2nd to the octave",  dir:"up", set:[1,2,3,4,5,6,7,8,9,10,11,12] },
   { id:3, title:"Level 3", desc:"Three notes in C major", key:"C major", set:[2,4,5,7,9,11,12],
     names:{2:"D", 4:"E", 5:"F", 7:"G", 9:"A", 11:"B", 12:"high C"} },
   { id:4, title:"Level 4", desc:"Three notes in C minor", key:"C minor", set:[2,3,5,7,8,10,12],
     names:{2:"D", 3:"E♭", 5:"F", 7:"G", 8:"A♭", 10:"B♭", 12:"high C"} },
+  { id:5, title:"Level 5", desc:"Two notes going down: minor 2nd to perfect 5th", dir:"down", set:[1,2,3,4,5,7] },
+  { id:6, title:"Level 6", desc:"Two notes going down: minor 2nd to the octave",  dir:"down", set:[1,2,3,4,5,6,7,8,9,10,11,12] },
 ];
 const TONIC = 48; // C on the A string, 3rd fret
-
-const MODES = [
-  { id:"each", label:"One of each",
-    hint:"Every interval in the level comes up once, in a random order.",
-    keyHint:"Every note of the scale comes up once as the second note and once as the third, in a random order." },
-  { id:"ten",  label:"10 random",
-    hint:"Ten intervals picked at random from the level, so some will come up more than once.",
-    keyHint:"Ten random questions." },
-];
-
-const DIRS = [
-  { id:"up",   label:"Going up" },
-  { id:"down", label:"Going down" },
-  { id:"both", label:"Both" },
-];
 
 const TRIES = 3;
 const $ = id => document.getElementById(id);
@@ -275,8 +252,6 @@ const store = {
 };
 
 let level = LEVELS.find(l => l.id === store.get("level", 1)) || LEVELS[0];
-let mode = MODES.find(m => m.id === store.get("mode", "each")) || MODES[0];
-let dir = DIRS.find(d => d.id === store.get("dir", "up")) || DIRS[0];
 // queue: one array of answers per question. seq: the notes played.
 // picks/locked: the key levels' two answers, in tap order, and which are confirmed right.
 let queue = [], qi = 0, seq = [], qdir = "up", triesLeft = TRIES, done = false, results = [];
@@ -344,11 +319,14 @@ function playCompare(n) { playSeq([seq[0], seq[0] + (qdir === "down" ? -n : n)])
 function show(id) { ["start", "test", "results"].forEach(s => $(s).hidden = s !== id); }
 
 function renderStart() {
-  renderLevels(); renderModes(); renderDirs(); renderSongToggles();
-  $("dirRow").hidden = !!level.key;
+  renderLevels(); renderSongToggles();
   $("ivSub").textContent = level.key
     ? `Listen to three notes in ${level.key}. The first is always C. Work out how far the second and third notes are from that C, and tap them in the order you hear them.`
-    : "Listen to two notes and work out the jump between them.";
+    : `Listen to two notes going ${level.dir} and work out the jump between them.`;
+  $("startHint").textContent = (level.key
+    ? "Every note of the scale comes up once as note 2 and once as note 3, in a random order."
+    : "Every interval in the level comes up once, in a random order.")
+    + " You get three tries at each one. There's no timer, so take as long as you like and replay as often as you need.";
 }
 
 function renderLevels() {
@@ -362,57 +340,17 @@ function renderLevels() {
   });
 }
 
-function renderModes() {
-  $("modes").innerHTML = "";
-  MODES.forEach(m => {
-    const b = document.createElement("button");
-    b.className = "pill" + (m === mode ? " on" : "");
-    b.textContent = m.label;
-    b.onclick = () => { mode = m; store.set("mode", m.id); renderModes(); };
-    $("modes").appendChild(b);
-  });
-  $("modeHint").textContent = level.key ? mode.keyHint : mode.hint;
-}
-
-// Ten picks from the level, never the same interval twice in a row
-function tenRandom(set) {
-  const q = [];
-  while (q.length < 10) {
-    const n = set[Math.floor(Math.random() * set.length)];
-    if (n !== q[q.length - 1]) q.push(n);
-  }
-  return q;
-}
 // Key levels: pairs of two different notes
 function eachPairs(set) {
   let a, b;
   do { a = shuffle(set.slice()); b = shuffle(set.slice()); } while (a.some((n, i) => n === b[i]));
   return a.map((n, i) => [n, b[i]]);
 }
-function tenPairs(set) {
-  const q = [], r = () => set[Math.floor(Math.random() * set.length)];
-  while (q.length < 10) {
-    const a = r(), b = r(), last = q[q.length - 1];
-    if (a !== b && !(last && last[0] === a && last[1] === b)) q.push([a, b]);
-  }
-  return q;
-}
 
-function renderDirs() {
-  $("dirs").innerHTML = "";
-  DIRS.forEach(d => {
-    const b = document.createElement("button");
-    b.className = "pill" + (d === dir ? " on" : "");
-    b.textContent = d.label;
-    b.onclick = () => { dir = d; store.set("dir", d.id); renderDirs(); };
-    $("dirs").appendChild(b);
-  });
-}
-
-// Going up only: the worksheet as it is. Otherwise both lists, arrowed, with the
+// Going up: the worksheet as it is. Going down: both lists, arrowed, with the
 // worksheet's "going down" songs moved into the down list rather than shown twice.
 function songsHtml(iv) {
-  if (level.key || dir.id === "up") return iv.songs.join("<br>");
+  if (level.dir !== "down") return iv.songs.join("<br>");
   const down = iv.down || [];
   const up = down.length ? iv.songs.filter(t => !t.includes("going down")) : iv.songs;
   return up.map(t => `<span class="arrow">↑</span>${t}`)
@@ -435,8 +373,7 @@ function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.fl
 
 function startTest() {
   audio();
-  if (level.key) queue = mode.id === "ten" ? tenPairs(level.set) : eachPairs(level.set);
-  else queue = (mode.id === "ten" ? tenRandom(level.set) : shuffle(level.set.slice())).map(n => [n]);
+  queue = level.key ? eachPairs(level.set) : shuffle(level.set.slice()).map(n => [n]);
   qi = 0; results = [];
   show("test");
   renderAnswers();
@@ -471,7 +408,7 @@ function nextQuestion() {
     renderPicks();
     setMsg("", "How far are notes 2 and 3 from the C? Tap them in order.");
   } else {
-    qdir = dir.id === "both" ? (Math.random() < 0.5 ? "up" : "down") : dir.id;
+    qdir = level.dir;
     // Both notes between A2 and C5, so it all stays in a comfy guitar range
     const off = qdir === "down" ? -q[0] : q[0];
     const lo = 45 - Math.min(0, off), hi = 72 - Math.max(0, off);
@@ -596,12 +533,8 @@ function finish() {
   const verdict = r => r.tries === 0 ? '<span class="no">Missed</span>'
     : r.tries === 1 ? '<span class="ok">First try</span>'
     : `<span class="ok">Try ${r.tries}</span>`;
-  const arrow = n => dir.id === "both" ? (results.find(x => x.n === n).dir === "down" ? " ↓" : " ↑") : "";
-  // One of each: list by interval. Ten random: list in the order they came.
-  const rows = mode.id === "ten"
-    ? results.map((r, i) => `<tr><td>${i + 1}. ${name(r.n)}${r.dir === "down" ? " ↓" : ""}</td><td class="r">${verdict(r)}</td></tr>`)
-    : INTERVALS.filter(i => level.set.includes(i.n)).map(i =>
-        `<tr><td>${i.name}${arrow(i.n)}</td><td class="r">${verdict(results.find(x => x.n === i.n))}</td></tr>`);
+  const rows = INTERVALS.filter(i => level.set.includes(i.n)).map(i =>
+    `<tr><td>${i.name}</td><td class="r">${verdict(results.find(x => x.n === i.n))}</td></tr>`);
   $("breakdown").innerHTML = rows.join("");
   show("results");
 }
