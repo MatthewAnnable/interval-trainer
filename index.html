@@ -111,11 +111,7 @@
   <section id="start">
     <div class="levels" id="levels"></div>
     <div class="card">
-      <div class="row" style="justify-content:space-between">
-        <span>Song reminders under each interval</span>
-        <button class="pill" id="songToggleStart"></button>
-      </div>
-      <p class="hint" id="startHint"></p>
+      <p class="hint" id="startHint" style="margin:0"></p>
     </div>
     <button class="big" id="go">Start the test</button>
   </section>
@@ -233,14 +229,14 @@ const INTERVALS = [
 // Levels 3 and 4 play three notes in a key. Both answers are measured from the
 // first note (always the tonic), and the student taps them in the order heard.
 const LEVELS = [
-  { id:1, title:"Level 1", desc:"Two notes going up: minor 2nd to perfect 5th", dir:"up", set:[1,2,3,4,5,7] },
-  { id:2, title:"Level 2", desc:"Two notes going up: minor 2nd to the octave",  dir:"up", set:[1,2,3,4,5,6,7,8,9,10,11,12] },
+  { id:1, title:"Level 1", desc:"Two notes going up: to perfect 5th", dir:"up", set:[1,2,3,4,5,7] },
+  { id:2, title:"Level 2", desc:"Two notes going up: to the octave",  dir:"up", set:[1,2,3,4,5,6,7,8,9,10,11,12] },
   { id:3, title:"Level 3", desc:"Three notes in C major", key:"C major", set:[2,4,5,7,9,11,12],
     names:{2:"D", 4:"E", 5:"F", 7:"G", 9:"A", 11:"B", 12:"high C"} },
   { id:4, title:"Level 4", desc:"Three notes in C minor", key:"C minor", set:[2,3,5,7,8,10,12],
     names:{2:"D", 3:"E♭", 5:"F", 7:"G", 8:"A♭", 10:"B♭", 12:"high C"} },
-  { id:5, title:"Level 5", desc:"Two notes going down: minor 2nd to perfect 5th", dir:"down", set:[1,2,3,4,5,7] },
-  { id:6, title:"Level 6", desc:"Two notes going down: minor 2nd to the octave",  dir:"down", set:[1,2,3,4,5,6,7,8,9,10,11,12] },
+  { id:5, title:"Level 5", desc:"Two notes going down: to perfect 5th", dir:"down", set:[1,2,3,4,5,7] },
+  { id:6, title:"Level 6", desc:"Two notes going down: to the octave",  dir:"down", set:[1,2,3,4,5,6,7,8,9,10,11,12] },
 ];
 const TONIC = 48; // C on the A string, 3rd fret
 
@@ -363,7 +359,6 @@ const songsKey = () => level.key ? "songsKey" : "songs";
 const songsOn = () => store.get(songsKey(), !level.key);
 function renderSongToggles() {
   const label = songsOn() ? "Hide songs" : "Show songs";
-  $("songToggleStart").textContent = label;
   $("songToggle").textContent = label;
   $("answers").classList.toggle("hide-songs", !songsOn());
 }
@@ -558,7 +553,6 @@ $("home").onclick = () => { renderStart(); show("start"); };
 $("quit").onclick = () => { stopAll(); renderStart(); show("start"); };
 $("replay").onclick = () => playSeq(seq);
 $("next").onclick = () => { qi++; nextQuestion(); };
-$("songToggleStart").onclick = toggleSongs;
 $("songToggle").onclick = toggleSongs;
 renderStart();
 
