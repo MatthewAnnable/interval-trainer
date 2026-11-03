@@ -60,6 +60,11 @@
   td { padding:8px 4px; border-top:1px solid var(--line); }
   td.r { text-align:right; font-weight:600; }
   .ok { color:var(--good); } .no { color:var(--bad); }
+  .seq { display:flex; align-items:center; gap:6px; margin:14px 0 0; color:var(--mute); font-size:14px; font-weight:600; }
+  .seq .nt { width:26px; height:26px; border-radius:50%; background:var(--chip); display:inline-flex; align-items:center; justify-content:center; color:var(--ink); }
+  .seq .jp { padding:2px 8px; border-radius:10px; }
+  .seq .jp.now { background:var(--accent); color:#fff; }
+  .seq .jp.ok { color:var(--good); } .seq .jp.no { color:var(--bad); }
   .tabs { display:flex; gap:8px; margin:0 0 14px; }
   .lickbtns { display:flex; gap:10px; flex-wrap:wrap; }
   .count { font-size:34px; font-weight:800; color:var(--accent); }
@@ -97,13 +102,17 @@
   <div class="tabs"><button class="pill" data-tab="intervals">Intervals</button><button class="pill" data-tab="licks">Pentatonic licks</button></div>
 
 <div id="intervalsApp">
-  <p class="sub">Listen to two notes and work out the jump between them.</p>
+  <p class="sub" id="ivSub">Listen to two notes and work out the jump between them.</p>
 
   <!-- Start screen -->
   <section id="start">
     <div class="levels" id="levels"></div>
     <div class="card">
       <div class="row" style="justify-content:space-between">
+        <span>Notes</span>
+        <div class="row" id="noteCounts"></div>
+      </div>
+      <div class="row" style="justify-content:space-between;margin-top:12px">
         <span>Test type</span>
         <div class="row" id="modes"></div>
       </div>
@@ -135,8 +144,10 @@
     <div class="bar"><i id="barFill"></i></div>
     <div class="play">
       <button class="big" id="replay">▶ Play again</button>
+      <button class="ghost" id="jumpOnly" hidden>▶ Just this jump</button>
       <button class="big" id="next" hidden>Next →</button>
     </div>
+    <div class="seq" id="seq" hidden></div>
     <div class="msg" id="msg"></div>
     <div class="answers" id="answers"></div>
     <p class="hint" id="compareHint" hidden>Tap any interval to hear it from the same starting note, so you can compare.</p>
@@ -247,6 +258,12 @@ const DIRS = [
   { id:"both", label:"Both" },
 ];
 
+// Three notes: name the jump from note 1 to 2, then from 2 to 3.
+const NOTE_COUNTS = [
+  { id:2, label:"Two notes",   sub:"Listen to two notes and work out the jump between them." },
+  { id:3, label:"Three notes", sub:"Listen to three notes and name both jumps: first note to second, then second to third." },
+];
+
 const TRIES = 3;
 const $ = id => document.getElementById(id);
 const store = {
@@ -257,8 +274,10 @@ const store = {
 let level = LEVELS.find(l => l.id === store.get("level", 1)) || LEVELS[0];
 let mode = MODES.find(m => m.id === store.get("mode", "each")) || MODES[0];
 let dir = DIRS.find(d => d.id === store.get("dir", "up")) || DIRS[0];
+let notes = NOTE_COUNTS.find(c => c.id === store.get("notes", 2)) || NOTE_COUNTS[0];
 let showSongs = store.get("songs", true);
-let queue = [], qi = 0, root = 0, qdir = "up", triesLeft = TRIES, done = false, results = [];
+// queue: one array of jumps per question. seq: the notes played; jump j is seq[j] → seq[j+1].
+let queue = [], qi = 0, ji = 0, seq = [], qdirs = [], triesLeft = TRIES, done = false, results = [];
 
 // ---------- Sound: a plucked string (Karplus-Strong) ----------
 let ctx = null;
@@ -303,17 +322,21 @@ function playNote(midi, when) {
   src.start(when); playing.push(src);
   return g;
 }
-// `root` is always the lower note; going down plays the top note first.
-function playInterval(semis) {
+// One note a second. Each is damped just before the next, so they never ring together.
+function playSeq(ms) {
   audio(); stopAll();
   const t = ctx.currentTime + 0.05;
-  const [a, b] = qdir === "down" ? [root + semis, root] : [root, root + semis];
-  const g = playNote(a, t);
-  // Damp the first note just before the second, so they never ring together
-  g.gain.setValueAtTime(0.55, t + 0.94);
-  g.gain.linearRampToValueAtTime(0, t + 1.0);
-  playNote(b, t + 1.0);
+  ms.forEach((m, i) => {
+    const g = playNote(m, t + i);
+    if (i < ms.length - 1) {
+      g.gain.setValueAtTime(0.55, t + i + 0.94);
+      g.gain.linearRampToValueAtTime(0, t + i + 1.0);
+    }
+  });
 }
+function playJump(j) { playSeq([seq[j], seq[j + 1]]); }
+// Compare mode: any interval from the start of the current jump, same direction
+function playCompare(n) { playSeq([seq[ji], seq[ji] + (qdirs[ji] === "down" ? -n : n)]); }
 
 // ---------- Screens ----------
 function show(id) { ["start", "test", "results"].forEach(s => $(s).hidden = s !== id); }
@@ -351,6 +374,18 @@ function tenRandom(set) {
   return q;
 }
 
+function renderNoteCounts() {
+  $("noteCounts").innerHTML = "";
+  NOTE_COUNTS.forEach(c => {
+    const b = document.createElement("button");
+    b.className = "pill" + (c === notes ? " on" : "");
+    b.textContent = c.label;
+    b.onclick = () => { notes = c; store.set("notes", c.id); renderNoteCounts(); };
+    $("noteCounts").appendChild(b);
+  });
+  $("ivSub").textContent = notes.sub;
+}
+
 function renderDirs() {
   $("dirs").innerHTML = "";
   DIRS.forEach(d => {
@@ -384,7 +419,14 @@ function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.fl
 
 function startTest() {
   audio();
-  queue = mode.id === "ten" ? tenRandom(level.set) : shuffle(level.set.slice());
+  const pick = () => mode.id === "ten" ? tenRandom(level.set) : shuffle(level.set.slice());
+  const a = pick();
+  if (notes.id === 2) queue = a.map(n => [n]);
+  else {
+    // One of each: every interval comes up once as a first jump and once as a second
+    const b = pick();
+    queue = a.map((n, i) => [n, b[i]]);
+  }
   qi = 0; results = [];
   show("test");
   renderAnswers();
@@ -406,49 +448,81 @@ function renderAnswers() {
 
 function nextQuestion() {
   if (qi >= queue.length) return finish();
-  // Root somewhere from A2 to C4, so even an octave stays in a comfy guitar range
-  root = 45 + Math.floor(Math.random() * 16);
-  qdir = dir.id === "both" ? (Math.random() < 0.5 ? "up" : "down") : dir.id;
+  const jumps = queue[qi];
+  qdirs = jumps.map(() => dir.id === "both" ? (Math.random() < 0.5 ? "up" : "down") : dir.id);
+  // Every note between A2 and C5, so it all stays in a comfy guitar range
+  const offs = [0];
+  jumps.forEach((n, j) => offs.push(offs[j] + (qdirs[j] === "down" ? -n : n)));
+  const lo = 45 - Math.min(...offs), hi = 72 - Math.max(...offs);
+  const start = lo + Math.floor(Math.random() * (hi - lo + 1));
+  seq = offs.map(o => start + o);
+  ji = 0;
+  $("progress").textContent = `Question ${qi + 1} of ${queue.length}`;
+  $("barFill").style.width = (qi / queue.length * 100) + "%";
+  $("jumpOnly").hidden = jumps.length < 2;
+  startJump();
+  playSeq(seq);
+}
+
+function startJump() {
   triesLeft = TRIES; done = false;
   document.querySelectorAll(".ans").forEach(b => { b.className = "ans"; b.disabled = false; });
   $("next").hidden = true; $("compareHint").hidden = true;
-  $("progress").textContent = `Question ${qi + 1} of ${queue.length}`;
-  $("barFill").style.width = (qi / queue.length * 100) + "%";
-  setMsg("", "Which interval is it?");
-  playInterval(queue[qi]);
+  renderSeq();
+  if (queue[qi].length < 2) setMsg("", "Which interval is it?");
+  else setMsg("", ji === 0 ? "First jump: note 1 to note 2?" : "Second jump: note 2 to note 3?");
+}
+
+// ① → ② → ③, with the jump being asked lit up and finished ones ticked or crossed
+function renderSeq() {
+  const n = queue[qi].length;
+  $("seq").hidden = n < 2;
+  if (n < 2) return;
+  let h = '<span class="nt">1</span>';
+  for (let j = 0; j < n; j++) {
+    const r = results.find(x => x.q === qi && x.j === j);
+    const cls = r ? (r.tries ? "ok" : "no") : j === ji ? "now" : "";
+    const mark = r ? (r.tries ? " ✓" : " ✗") : "";
+    h += `<span class="jp ${cls}">→${mark}</span><span class="nt">${j + 2}</span>`;
+  }
+  $("seq").innerHTML = h;
 }
 
 function setMsg(cls, html) { $("msg").className = "msg " + cls; $("msg").innerHTML = html; }
 function dots() { let h = '<span class="tries">'; for (let i = 0; i < TRIES; i++) h += `<i class="${i < triesLeft ? "" : "used"}"></i>`; return h + "</span>"; }
 
 function answer(n, btn) {
-  const target = queue[qi];
-  if (done) { playInterval(n); return; } // compare mode once the question is over
+  const target = queue[qi][ji];
+  if (done) { playCompare(n); return; } // compare mode once the jump is over
+  const rec = tries => results.push({ q: qi, j: ji, n: target, dir: qdirs[ji], tries });
   if (n === target) {
     btn.classList.add("right");
-    results.push({ n: target, dir: qdir, tries: TRIES - triesLeft + 1 });
-    endQuestion("good", `Yes, that's a ${name(target)}!`);
+    rec(TRIES - triesLeft + 1);
+    endJump("good", `Yes, that's a ${name(target)}!`);
     return;
   }
   triesLeft--;
   btn.classList.add("wrong"); btn.disabled = true;
   if (triesLeft > 0) {
     setMsg("bad", `Not quite. ${triesLeft} more ${triesLeft === 1 ? "try" : "tries"}. ${dots()}`);
-    playInterval(target);
+    playSeq(seq);
   } else {
     document.querySelector(`.ans[data-n="${target}"]`).classList.add("right");
-    results.push({ n: target, dir: qdir, tries: 0 });
-    endQuestion("bad", `It was a ${name(target)}. Listen again…`);
-    playInterval(target);
+    rec(0);
+    endJump("bad", `It was a ${name(target)}. Listen again…`);
+    playJump(ji);
   }
 }
 
-function endQuestion(cls, text) {
+function endJump(cls, text) {
   done = true;
   setMsg(cls, text);
+  renderSeq();
   document.querySelectorAll(".ans").forEach(b => b.disabled = false);
+  const more = ji + 1 < queue[qi].length;
   $("next").hidden = false; $("compareHint").hidden = false;
-  $("next").textContent = qi + 1 >= queue.length ? "See my score →" : "Next →";
+  $("compareHint").textContent = `Tap any interval to hear it from the same starting note${queue[qi].length > 1 ? ` (note ${ji + 1})` : ""}, so you can compare.`;
+  $("next").textContent = more ? "Second jump →" : qi + 1 >= queue.length ? "See my score →" : "Next →";
 }
 
 function name(n) { return INTERVALS.find(i => i.n === n).name; }
@@ -456,6 +530,7 @@ function name(n) { return INTERVALS.find(i => i.n === n).name; }
 function finish() {
   stopAll();
   $("barFill").style.width = "100%";
+  if (notes.id === 3) return finishThree();
   const first = results.filter(r => r.tries === 1).length;
   const got = results.filter(r => r.tries > 0).length;
   $("score").textContent = `${got} / ${results.length}`;
@@ -473,16 +548,37 @@ function finish() {
   show("results");
 }
 
+// Three notes: score counts jumps, and the breakdown lists each question in order
+function finishThree() {
+  const first = results.filter(r => r.tries === 1).length;
+  const got = results.filter(r => r.tries > 0).length;
+  $("score").textContent = `${got} / ${results.length}`;
+  $("scoreNote").textContent = `Jumps named: ${first} first time, ${got - first} after another try, ${results.length - got} to keep working on.`;
+  const mark = r => r.tries === 0 ? '<span class="no">✗</span>' : '<span class="ok">✓</span>';
+  const arrow = r => r.dir === "down" ? " ↓" : dir.id === "both" ? " ↑" : "";
+  const rows = queue.map((_, q) => {
+    const [a, b] = results.filter(r => r.q === q);
+    return `<tr><td>${q + 1}. ${name(a.n)}${arrow(a)}, then ${name(b.n)}${arrow(b)}</td><td class="r">${mark(a)} ${mark(b)}</td></tr>`;
+  });
+  $("breakdown").innerHTML = rows.join("");
+  show("results");
+}
+
 // ---------- Wire up ----------
 $("go").onclick = startTest;
 $("again").onclick = startTest;
-$("home").onclick = () => { renderLevels(); renderModes(); renderDirs(); show("start"); };
+$("home").onclick = () => { renderLevels(); renderNoteCounts(); renderModes(); renderDirs(); show("start"); };
 $("quit").onclick = () => { stopAll(); renderLevels(); show("start"); };
-$("replay").onclick = () => playInterval(queue[qi]);
-$("next").onclick = () => { qi++; nextQuestion(); };
+$("replay").onclick = () => playSeq(seq);
+$("jumpOnly").onclick = () => playJump(ji);
+$("next").onclick = () => {
+  if (ji + 1 < queue[qi].length) { ji++; startJump(); playSeq(seq); }
+  else { qi++; nextQuestion(); }
+};
 $("songToggleStart").onclick = toggleSongs;
 $("songToggle").onclick = toggleSongs;
 renderLevels();
+renderNoteCounts();
 renderModes();
 renderDirs();
 renderSongToggles();
