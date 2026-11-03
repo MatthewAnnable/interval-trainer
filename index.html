@@ -61,10 +61,13 @@
   td.r { text-align:right; font-weight:600; }
   .ok { color:var(--good); } .no { color:var(--bad); }
   .seq { display:flex; align-items:center; gap:6px; margin:14px 0 0; color:var(--mute); font-size:14px; font-weight:600; }
-  .seq .nt { width:26px; height:26px; border-radius:50%; background:var(--chip); display:inline-flex; align-items:center; justify-content:center; color:var(--ink); }
-  .seq .jp { padding:2px 8px; border-radius:10px; }
-  .seq .jp.now { background:var(--accent); color:#fff; }
-  .seq .jp.ok { color:var(--good); } .seq .jp.no { color:var(--bad); }
+  .seq .nt { min-width:30px; height:30px; padding:0 6px; border-radius:15px; background:var(--chip); display:inline-flex; align-items:center; justify-content:center; color:var(--ink); }
+  .seq .nt.ok { background:var(--goodbg); color:var(--good); }
+  .seq .nt.next { box-shadow:0 0 0 2px var(--accent) inset; }
+  .seq .key { margin-right:4px; }
+  .ans { position:relative; }
+  .ans .pick { position:absolute; top:-9px; right:8px; background:var(--accent); color:#fff; border-radius:10px; padding:1px 8px; font-size:12px; font-weight:700; }
+  .ans.picked { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent) inset; }
   .tabs { display:flex; gap:8px; margin:0 0 14px; }
   .lickbtns { display:flex; gap:10px; flex-wrap:wrap; }
   .count { font-size:34px; font-weight:800; color:var(--accent); }
@@ -109,14 +112,10 @@
     <div class="levels" id="levels"></div>
     <div class="card">
       <div class="row" style="justify-content:space-between">
-        <span>Notes</span>
-        <div class="row" id="noteCounts"></div>
-      </div>
-      <div class="row" style="justify-content:space-between;margin-top:12px">
         <span>Test type</span>
         <div class="row" id="modes"></div>
       </div>
-      <div class="row" style="justify-content:space-between;margin-top:12px">
+      <div class="row" id="dirRow" style="justify-content:space-between;margin-top:12px">
         <span>Direction</span>
         <div class="row" id="dirs"></div>
       </div>
@@ -144,7 +143,6 @@
     <div class="bar"><i id="barFill"></i></div>
     <div class="play">
       <button class="big" id="replay">▶ Play again</button>
-      <button class="ghost" id="jumpOnly" hidden>▶ Just this jump</button>
       <button class="big" id="next" hidden>Next →</button>
     </div>
     <div class="seq" id="seq" hidden></div>
@@ -242,26 +240,31 @@ const INTERVALS = [
   { n:12, name:"Octave",      songs:["<strong>Somewhere Over the Rainbow</strong> (on “Some-where”)"] },
 ];
 
+// Levels 3 and 4 play three notes in a key. Both answers are measured from the
+// first note (always the tonic), and the student taps them in the order heard.
 const LEVELS = [
-  { id:1, title:"Level 1", desc:"Minor 2nd up to a perfect 5th", set:[1,2,3,4,5,7] },
-  { id:2, title:"Level 2", desc:"Minor 2nd up to the octave",    set:[1,2,3,4,5,6,7,8,9,10,11,12] },
+  { id:1, title:"Level 1", desc:"Two notes: minor 2nd up to a perfect 5th", set:[1,2,3,4,5,7] },
+  { id:2, title:"Level 2", desc:"Two notes: minor 2nd up to the octave",    set:[1,2,3,4,5,6,7,8,9,10,11,12] },
+  { id:3, title:"Level 3", desc:"Three notes in C major", key:"C major", set:[2,4,5,7,9,11,12],
+    names:{2:"D", 4:"E", 5:"F", 7:"G", 9:"A", 11:"B", 12:"high C"} },
+  { id:4, title:"Level 4", desc:"Three notes in C minor", key:"C minor", set:[2,3,5,7,8,10,12],
+    names:{2:"D", 3:"E♭", 5:"F", 7:"G", 8:"A♭", 10:"B♭", 12:"high C"} },
 ];
+const TONIC = 48; // C on the A string, 3rd fret
 
 const MODES = [
-  { id:"each", label:"One of each", hint:"Every interval in the level comes up once, in a random order." },
-  { id:"ten",  label:"10 random",   hint:"Ten intervals picked at random from the level, so some will come up more than once." },
+  { id:"each", label:"One of each",
+    hint:"Every interval in the level comes up once, in a random order.",
+    keyHint:"Every note of the scale comes up once as the second note and once as the third, in a random order." },
+  { id:"ten",  label:"10 random",
+    hint:"Ten intervals picked at random from the level, so some will come up more than once.",
+    keyHint:"Ten random questions." },
 ];
 
 const DIRS = [
   { id:"up",   label:"Going up" },
   { id:"down", label:"Going down" },
   { id:"both", label:"Both" },
-];
-
-// Three notes: name the jump from note 1 to 2, then from 2 to 3.
-const NOTE_COUNTS = [
-  { id:2, label:"Two notes",   sub:"Listen to two notes and work out the jump between them." },
-  { id:3, label:"Three notes", sub:"Listen to three notes and name both jumps: first note to second, then second to third." },
 ];
 
 const TRIES = 3;
@@ -274,10 +277,10 @@ const store = {
 let level = LEVELS.find(l => l.id === store.get("level", 1)) || LEVELS[0];
 let mode = MODES.find(m => m.id === store.get("mode", "each")) || MODES[0];
 let dir = DIRS.find(d => d.id === store.get("dir", "up")) || DIRS[0];
-let notes = NOTE_COUNTS.find(c => c.id === store.get("notes", 2)) || NOTE_COUNTS[0];
-let showSongs = store.get("songs", true);
-// queue: one array of jumps per question. seq: the notes played; jump j is seq[j] → seq[j+1].
-let queue = [], qi = 0, ji = 0, seq = [], qdirs = [], triesLeft = TRIES, done = false, results = [];
+// queue: one array of answers per question. seq: the notes played.
+// picks/locked: the key levels' two answers, in tap order, and which are confirmed right.
+let queue = [], qi = 0, seq = [], qdir = "up", triesLeft = TRIES, done = false, results = [];
+let picks = [null, null], locked = [false, false], wrongMarks = [];
 
 // ---------- Sound: a plucked string (Karplus-Strong) ----------
 let ctx = null;
@@ -334,20 +337,27 @@ function playSeq(ms) {
     }
   });
 }
-function playJump(j) { playSeq([seq[j], seq[j + 1]]); }
-// Compare mode: any interval from the start of the current jump, same direction
-function playCompare(n) { playSeq([seq[ji], seq[ji] + (qdirs[ji] === "down" ? -n : n)]); }
+// Compare mode: any interval from the first note, same direction
+function playCompare(n) { playSeq([seq[0], seq[0] + (qdir === "down" ? -n : n)]); }
 
 // ---------- Screens ----------
 function show(id) { ["start", "test", "results"].forEach(s => $(s).hidden = s !== id); }
+
+function renderStart() {
+  renderLevels(); renderModes(); renderDirs(); renderSongToggles();
+  $("dirRow").hidden = !!level.key;
+  $("ivSub").textContent = level.key
+    ? `Listen to three notes in ${level.key}. The first is always C. Work out how far the second and third notes are from that C, and tap them in the order you hear them.`
+    : "Listen to two notes and work out the jump between them.";
+}
 
 function renderLevels() {
   $("levels").innerHTML = "";
   LEVELS.forEach(l => {
     const b = document.createElement("button");
     b.className = "level" + (l === level ? " on" : "");
-    b.innerHTML = `<b>${l.title}</b><span>${l.desc} · ${l.set.length} intervals</span>`;
-    b.onclick = () => { level = l; store.set("level", l.id); renderLevels(); };
+    b.innerHTML = `<b>${l.title}</b><span>${l.desc} · ${l.set.length} ${l.key ? "notes" : "intervals"}</span>`;
+    b.onclick = () => { level = l; store.set("level", l.id); renderStart(); };
     $("levels").appendChild(b);
   });
 }
@@ -361,7 +371,7 @@ function renderModes() {
     b.onclick = () => { mode = m; store.set("mode", m.id); renderModes(); };
     $("modes").appendChild(b);
   });
-  $("modeHint").textContent = mode.hint;
+  $("modeHint").textContent = level.key ? mode.keyHint : mode.hint;
 }
 
 // Ten picks from the level, never the same interval twice in a row
@@ -373,17 +383,19 @@ function tenRandom(set) {
   }
   return q;
 }
-
-function renderNoteCounts() {
-  $("noteCounts").innerHTML = "";
-  NOTE_COUNTS.forEach(c => {
-    const b = document.createElement("button");
-    b.className = "pill" + (c === notes ? " on" : "");
-    b.textContent = c.label;
-    b.onclick = () => { notes = c; store.set("notes", c.id); renderNoteCounts(); };
-    $("noteCounts").appendChild(b);
-  });
-  $("ivSub").textContent = notes.sub;
+// Key levels: pairs of two different notes
+function eachPairs(set) {
+  let a, b;
+  do { a = shuffle(set.slice()); b = shuffle(set.slice()); } while (a.some((n, i) => n === b[i]));
+  return a.map((n, i) => [n, b[i]]);
+}
+function tenPairs(set) {
+  const q = [], r = () => set[Math.floor(Math.random() * set.length)];
+  while (q.length < 10) {
+    const a = r(), b = r(), last = q[q.length - 1];
+    if (a !== b && !(last && last[0] === a && last[1] === b)) q.push([a, b]);
+  }
+  return q;
 }
 
 function renderDirs() {
@@ -400,33 +412,31 @@ function renderDirs() {
 // Going up only: the worksheet as it is. Otherwise both lists, arrowed, with the
 // worksheet's "going down" songs moved into the down list rather than shown twice.
 function songsHtml(iv) {
-  if (dir.id === "up") return iv.songs.join("<br>");
+  if (level.key || dir.id === "up") return iv.songs.join("<br>");
   const down = iv.down || [];
   const up = down.length ? iv.songs.filter(t => !t.includes("going down")) : iv.songs;
   return up.map(t => `<span class="arrow">↑</span>${t}`)
     .concat(down.map(t => `<span class="arrow">↓</span>${t}`)).join("<br>");
 }
 
+// Songs show by default on levels 1–2 and are hidden by default on 3–4,
+// where they're a hint for when a student is stuck. Each remembers its own choice.
+const songsKey = () => level.key ? "songsKey" : "songs";
+const songsOn = () => store.get(songsKey(), !level.key);
 function renderSongToggles() {
-  const label = showSongs ? "Hide songs" : "Show songs";
+  const label = songsOn() ? "Hide songs" : "Show songs";
   $("songToggleStart").textContent = label;
   $("songToggle").textContent = label;
-  $("answers").classList.toggle("hide-songs", !showSongs);
+  $("answers").classList.toggle("hide-songs", !songsOn());
 }
-function toggleSongs() { showSongs = !showSongs; store.set("songs", showSongs); renderSongToggles(); }
+function toggleSongs() { store.set(songsKey(), !songsOn()); renderSongToggles(); }
 
 function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 
 function startTest() {
   audio();
-  const pick = () => mode.id === "ten" ? tenRandom(level.set) : shuffle(level.set.slice());
-  const a = pick();
-  if (notes.id === 2) queue = a.map(n => [n]);
-  else {
-    // One of each: every interval comes up once as a first jump and once as a second
-    const b = pick();
-    queue = a.map((n, i) => [n, b[i]]);
-  }
+  if (level.key) queue = mode.id === "ten" ? tenPairs(level.set) : eachPairs(level.set);
+  else queue = (mode.id === "ten" ? tenRandom(level.set) : shuffle(level.set.slice())).map(n => [n]);
   qi = 0; results = [];
   show("test");
   renderAnswers();
@@ -439,8 +449,9 @@ function renderAnswers() {
     const iv = INTERVALS.find(i => i.n === n);
     const b = document.createElement("button");
     b.className = "ans"; b.dataset.n = n;
-    b.innerHTML = `<b>${iv.name}<span class="frets">${n} fret${n > 1 ? "s" : ""}</span></b><div class="songs">${songsHtml(iv)}</div>`;
-    b.onclick = () => answer(n, b);
+    const sub = level.key ? level.names[n] : `${n} fret${n > 1 ? "s" : ""}`;
+    b.innerHTML = `<b>${iv.name}<span class="frets">${sub}</span></b><div class="songs">${songsHtml(iv)}</div><span class="pick" hidden></span>`;
+    b.onclick = () => level.key ? pickAnswer(n) : answer(n, b);
     $("answers").appendChild(b);
   });
   renderSongToggles();
@@ -448,57 +459,42 @@ function renderAnswers() {
 
 function nextQuestion() {
   if (qi >= queue.length) return finish();
-  const jumps = queue[qi];
-  qdirs = jumps.map(() => dir.id === "both" ? (Math.random() < 0.5 ? "up" : "down") : dir.id);
-  // Every note between A2 and C5, so it all stays in a comfy guitar range
-  const offs = [0];
-  jumps.forEach((n, j) => offs.push(offs[j] + (qdirs[j] === "down" ? -n : n)));
-  const lo = 45 - Math.min(...offs), hi = 72 - Math.max(...offs);
-  const start = lo + Math.floor(Math.random() * (hi - lo + 1));
-  seq = offs.map(o => start + o);
-  ji = 0;
+  const q = queue[qi];
+  triesLeft = TRIES; done = false;
+  $("next").hidden = true; $("compareHint").hidden = true;
   $("progress").textContent = `Question ${qi + 1} of ${queue.length}`;
   $("barFill").style.width = (qi / queue.length * 100) + "%";
-  $("jumpOnly").hidden = jumps.length < 2;
-  startJump();
-  playSeq(seq);
-}
-
-function startJump() {
-  triesLeft = TRIES; done = false;
-  document.querySelectorAll(".ans").forEach(b => { b.className = "ans"; b.disabled = false; });
-  $("next").hidden = true; $("compareHint").hidden = true;
-  renderSeq();
-  if (queue[qi].length < 2) setMsg("", "Which interval is it?");
-  else setMsg("", ji === 0 ? "First jump: note 1 to note 2?" : "Second jump: note 2 to note 3?");
-}
-
-// ① → ② → ③, with the jump being asked lit up and finished ones ticked or crossed
-function renderSeq() {
-  const n = queue[qi].length;
-  $("seq").hidden = n < 2;
-  if (n < 2) return;
-  let h = '<span class="nt">1</span>';
-  for (let j = 0; j < n; j++) {
-    const r = results.find(x => x.q === qi && x.j === j);
-    const cls = r ? (r.tries ? "ok" : "no") : j === ji ? "now" : "";
-    const mark = r ? (r.tries ? " ✓" : " ✗") : "";
-    h += `<span class="jp ${cls}">→${mark}</span><span class="nt">${j + 2}</span>`;
+  if (level.key) {
+    qdir = "up";
+    seq = [TONIC, TONIC + q[0], TONIC + q[1]];
+    picks = [null, null]; locked = [false, false]; wrongMarks = [];
+    renderPicks();
+    setMsg("", "How far are notes 2 and 3 from the C? Tap them in order.");
+  } else {
+    qdir = dir.id === "both" ? (Math.random() < 0.5 ? "up" : "down") : dir.id;
+    // Both notes between A2 and C5, so it all stays in a comfy guitar range
+    const off = qdir === "down" ? -q[0] : q[0];
+    const lo = 45 - Math.min(0, off), hi = 72 - Math.max(0, off);
+    const start = lo + Math.floor(Math.random() * (hi - lo + 1));
+    seq = [start, start + off];
+    document.querySelectorAll(".ans").forEach(b => { b.className = "ans"; b.disabled = false; });
+    $("seq").hidden = true;
+    setMsg("", "Which interval is it?");
   }
-  $("seq").innerHTML = h;
+  playSeq(seq);
 }
 
 function setMsg(cls, html) { $("msg").className = "msg " + cls; $("msg").innerHTML = html; }
 function dots() { let h = '<span class="tries">'; for (let i = 0; i < TRIES; i++) h += `<i class="${i < triesLeft ? "" : "used"}"></i>`; return h + "</span>"; }
 
+// ---------- Levels 1–2: one interval ----------
 function answer(n, btn) {
-  const target = queue[qi][ji];
-  if (done) { playCompare(n); return; } // compare mode once the jump is over
-  const rec = tries => results.push({ q: qi, j: ji, n: target, dir: qdirs[ji], tries });
+  const target = queue[qi][0];
+  if (done) { playCompare(n); return; } // compare mode once the question is over
   if (n === target) {
     btn.classList.add("right");
-    rec(TRIES - triesLeft + 1);
-    endJump("good", `Yes, that's a ${name(target)}!`);
+    results.push({ n: target, dir: qdir, tries: TRIES - triesLeft + 1 });
+    endQuestion("good", `Yes, that's a ${name(target)}!`);
     return;
   }
   triesLeft--;
@@ -508,21 +504,83 @@ function answer(n, btn) {
     playSeq(seq);
   } else {
     document.querySelector(`.ans[data-n="${target}"]`).classList.add("right");
-    rec(0);
-    endJump("bad", `It was a ${name(target)}. Listen again…`);
-    playJump(ji);
+    results.push({ n: target, dir: qdir, tries: 0 });
+    endQuestion("bad", `It was a ${name(target)}. Listen again…`);
+    playSeq(seq);
   }
 }
 
-function endJump(cls, text) {
+function endQuestion(cls, text) {
   done = true;
   setMsg(cls, text);
-  renderSeq();
   document.querySelectorAll(".ans").forEach(b => b.disabled = false);
-  const more = ji + 1 < queue[qi].length;
   $("next").hidden = false; $("compareHint").hidden = false;
-  $("compareHint").textContent = `Tap any interval to hear it from the same starting note${queue[qi].length > 1 ? ` (note ${ji + 1})` : ""}, so you can compare.`;
-  $("next").textContent = more ? "Second jump →" : qi + 1 >= queue.length ? "See my score →" : "Next →";
+  $("compareHint").textContent = level.key
+    ? "Tap any interval to hear it from the C, so you can compare."
+    : "Tap any interval to hear it from the same starting note, so you can compare.";
+  $("next").textContent = qi + 1 >= queue.length ? "See my score →" : "Next →";
+}
+
+// ---------- Levels 3–4: two answers, both from the first note ----------
+const noteName = n => level.names[n];
+const both = q => `${name(q[0])} (${noteName(q[0])}), then ${name(q[1])} (${noteName(q[1])})`;
+
+function pickAnswer(n) {
+  if (done) { playCompare(n); return; }
+  const at = picks.indexOf(n);
+  if (at >= 0) {
+    if (!locked[at]) { picks[at] = null; renderPicks(); } // tap again to take it back
+    return;
+  }
+  wrongMarks = [];
+  picks[picks.indexOf(null)] = n;
+  renderPicks();
+  if (!picks.includes(null)) check();
+}
+
+function check() {
+  const q = queue[qi], attempt = TRIES - triesLeft + 1;
+  const ok = [0, 1].map(i => picks[i] === q[i]);
+  const rec = results.find(r => r.q === qi) || (results.push({ q: qi, n: q, tries: [0, 0] }), results[results.length - 1]);
+  ok.forEach((g, i) => { if (g && !locked[i]) { locked[i] = true; rec.tries[i] = attempt; } });
+  if (ok[0] && ok[1]) {
+    renderPicks();
+    return endQuestion("good", `Yes! ${both(q)}.`);
+  }
+  triesLeft--;
+  if (triesLeft > 0) {
+    const swapped = picks[0] === q[1] && picks[1] === q[0];
+    const what = swapped ? "Right notes, wrong order."
+      : ok[0] ? "Note 2 is right, note 3 isn't."
+      : ok[1] ? "Note 3 is right, note 2 isn't."
+      : "Neither is right yet.";
+    wrongMarks = picks.filter((p, i) => !ok[i]);
+    picks = picks.map((p, i) => ok[i] ? p : null);
+    renderPicks();
+    setMsg("bad", `${what} ${triesLeft} more ${triesLeft === 1 ? "try" : "tries"}. ${dots()}`);
+  } else {
+    picks = q.slice(); locked = [true, true]; wrongMarks = [];
+    renderPicks();
+    endQuestion("bad", `It was ${both(q)}. Listen again…`);
+  }
+  playSeq(seq);
+}
+
+// The C → ? → ? guide, and the "note 2" / "note 3" badges on the buttons
+function renderPicks() {
+  let h = `<span class="key">${level.key}:</span><span class="nt">C</span>`;
+  const nextSlot = picks.indexOf(null);
+  [0, 1].forEach(i => {
+    const cls = locked[i] ? "ok" : i === nextSlot ? "next" : "";
+    h += `→<span class="nt ${cls}">${picks[i] === null ? "?" : noteName(picks[i])}</span>`;
+  });
+  $("seq").innerHTML = h; $("seq").hidden = false;
+  document.querySelectorAll(".ans").forEach(b => {
+    const n = +b.dataset.n, i = picks.indexOf(n), badge = b.querySelector(".pick");
+    b.className = "ans" + (i >= 0 ? (locked[i] ? " right" : " picked") : wrongMarks.includes(n) ? " wrong" : "");
+    badge.hidden = i < 0;
+    badge.textContent = `note ${i + 2}`;
+  });
 }
 
 function name(n) { return INTERVALS.find(i => i.n === n).name; }
@@ -530,7 +588,7 @@ function name(n) { return INTERVALS.find(i => i.n === n).name; }
 function finish() {
   stopAll();
   $("barFill").style.width = "100%";
-  if (notes.id === 3) return finishThree();
+  if (level.key) return finishKey();
   const first = results.filter(r => r.tries === 1).length;
   const got = results.filter(r => r.tries > 0).length;
   $("score").textContent = `${got} / ${results.length}`;
@@ -548,40 +606,28 @@ function finish() {
   show("results");
 }
 
-// Three notes: score counts jumps, and the breakdown lists each question in order
-function finishThree() {
-  const first = results.filter(r => r.tries === 1).length;
-  const got = results.filter(r => r.tries > 0).length;
-  $("score").textContent = `${got} / ${results.length}`;
-  $("scoreNote").textContent = `Jumps named: ${first} first time, ${got - first} after another try, ${results.length - got} to keep working on.`;
-  const mark = r => r.tries === 0 ? '<span class="no">✗</span>' : '<span class="ok">✓</span>';
-  const arrow = r => r.dir === "down" ? " ↓" : dir.id === "both" ? " ↑" : "";
-  const rows = queue.map((_, q) => {
-    const [a, b] = results.filter(r => r.q === q);
-    return `<tr><td>${q + 1}. ${name(a.n)}${arrow(a)}, then ${name(b.n)}${arrow(b)}</td><td class="r">${mark(a)} ${mark(b)}</td></tr>`;
-  });
-  $("breakdown").innerHTML = rows.join("");
+// Key levels: the score counts notes (two per question), listed in the order they came
+function finishKey() {
+  const all = results.flatMap(r => r.tries);
+  const first = all.filter(t => t === 1).length, got = all.filter(t => t > 0).length;
+  $("score").textContent = `${got} / ${all.length}`;
+  $("scoreNote").textContent = `Notes: ${first} first time, ${got - first} after another try, ${all.length - got} to keep working on.`;
+  const mark = t => t ? '<span class="ok">✓</span>' : '<span class="no">✗</span>';
+  $("breakdown").innerHTML = results.map(r =>
+    `<tr><td>${r.q + 1}. C, ${noteName(r.n[0])}, ${noteName(r.n[1])}</td><td class="r">${mark(r.tries[0])} ${mark(r.tries[1])}</td></tr>`).join("");
   show("results");
 }
 
 // ---------- Wire up ----------
 $("go").onclick = startTest;
 $("again").onclick = startTest;
-$("home").onclick = () => { renderLevels(); renderNoteCounts(); renderModes(); renderDirs(); show("start"); };
-$("quit").onclick = () => { stopAll(); renderLevels(); show("start"); };
+$("home").onclick = () => { renderStart(); show("start"); };
+$("quit").onclick = () => { stopAll(); renderStart(); show("start"); };
 $("replay").onclick = () => playSeq(seq);
-$("jumpOnly").onclick = () => playJump(ji);
-$("next").onclick = () => {
-  if (ji + 1 < queue[qi].length) { ji++; startJump(); playSeq(seq); }
-  else { qi++; nextQuestion(); }
-};
+$("next").onclick = () => { qi++; nextQuestion(); };
 $("songToggleStart").onclick = toggleSongs;
 $("songToggle").onclick = toggleSongs;
-renderLevels();
-renderNoteCounts();
-renderModes();
-renderDirs();
-renderSongToggles();
+renderStart();
 
 // ================= Pentatonic licks =================
 // Box 1 of A minor pentatonic, frets 5–8. In this box every pitch has exactly one
