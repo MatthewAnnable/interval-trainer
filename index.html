@@ -91,6 +91,26 @@
   .box th { font-weight:400; color:var(--mute); font-size:12px; padding:2px; }
   .box .sname { color:var(--mute); font-size:12px; padding-right:6px; text-align:right; border:0; width:auto; }
   .box .sname::before { display:none; }
+  /* Find on the neck */
+  :root { --board:#efe7d6; --wire:#c3b79c; --string:#8a8578; }
+  @media (prefers-color-scheme: dark) { :root { --board:#2f2a24; --wire:#5a5146; --string:#9c958a; } }
+  .tabs { flex-wrap:wrap; }
+  .fb { display:block; width:100%; height:auto; touch-action:manipulation; user-select:none; -webkit-user-select:none; }
+  .fb .cell { fill:transparent; cursor:pointer; }
+  .fb .lab { fill:var(--mute); font-size:13px; font-weight:600; }
+  .fb .dot text { font-size:14px; font-weight:700; fill:#fff; pointer-events:none; }
+  .fb .dot circle { stroke:var(--card); stroke-width:2; pointer-events:none; }
+  .fb .root circle { fill:var(--ink); } .fb .root text { fill:var(--bg); }
+  .fb .right circle { fill:var(--good); }
+  .fb .wrong circle { fill:var(--bad); }
+  .fb .shape circle { fill:var(--accent); }
+  .fb .compare circle { fill:var(--mute); }
+  .fb .link { stroke:var(--accent); stroke-width:2.5; stroke-dasharray:5 4; stroke-linecap:round; fill:none; pointer-events:none; }
+  @media (prefers-color-scheme: dark) { .fb .dot text { fill:#181614; } .fb .root text { fill:var(--bg); } }
+  .rootline { font-size:15px; margin:0 0 8px; } .rootline b { font-size:20px; }
+  .shapecard b { font-size:17px; } .shapecard .songs { color:var(--mute); font-size:14px; margin-top:4px; }
+  .narrow-only { display:none; }
+  @media (max-width:600px) and (orientation:portrait) { .narrow-only { display:block; } }
   [hidden] { display:none !important; }
   @media (max-width:480px) {
     .levels { grid-template-columns:1fr; }
@@ -102,7 +122,7 @@
 <body>
 <div class="wrap">
   <h1>Ear Trainer</h1>
-  <div class="tabs"><button class="pill" data-tab="intervals">Intervals</button><button class="pill" data-tab="licks">Pentatonic licks</button></div>
+  <div class="tabs"><button class="pill" data-tab="intervals">Intervals</button><button class="pill" data-tab="find">Find on the neck</button><button class="pill" data-tab="licks">Pentatonic licks</button></div>
 
 <div id="intervalsApp">
   <p class="sub" id="ivSub">Listen to two notes and work out the jump between them.</p>
@@ -147,6 +167,50 @@
     <div class="row">
       <button class="big" id="again">Try again</button>
       <button class="ghost" id="home">Change level</button>
+    </div>
+  </section>
+</div>
+
+<div id="findApp" hidden>
+  <p class="sub">The app plays the root, then a higher note. Find that second note on the fretboard and tap it. Then see the shape it makes from the root.</p>
+
+  <section id="fStart">
+    <div class="levels" id="fLevels"></div>
+    <div class="card">
+      <p class="hint" style="margin:0">Every interval in the level comes up once, in a random order, from a different root each time. Any place on the neck with the right note counts. You get three tries at each one. There's no timer, so take as long as you like and replay as often as you need.</p>
+      <p class="hint narrow-only">On a phone, turn it sideways for a bigger fretboard.</p>
+    </div>
+    <button class="big" id="fGo">Start the test</button>
+  </section>
+
+  <section id="fTest" hidden>
+    <div class="top">
+      <span class="progress" id="fProgress"></span>
+      <button class="pill" id="fQuit">Stop</button>
+    </div>
+    <div class="bar"><i id="fBar"></i></div>
+    <div class="play">
+      <button class="big" id="fReplay">▶ Play again</button>
+      <button class="big" id="fNext" hidden>Next →</button>
+    </div>
+    <div class="msg" id="fMsg"></div>
+    <div class="rootline" id="fRootLine"></div>
+    <p class="hint narrow-only" style="margin:0 0 6px">Turn your phone sideways for a bigger fretboard.</p>
+    <svg class="fb" id="fBoard" role="img" aria-label="Guitar fretboard. Tap a note."></svg>
+    <div class="card shapecard" id="fShape" hidden></div>
+    <p class="hint" id="fCompareHint" hidden>Tap any note to hear it after the root and see which interval it is.</p>
+  </section>
+
+  <section id="fResults" hidden>
+    <div class="card">
+      <div class="progress">Your score</div>
+      <div class="result-big" id="fScore"></div>
+      <div id="fScoreNote" class="hint" style="margin-top:0"></div>
+    </div>
+    <div class="card"><table id="fBreakdown"></table></div>
+    <div class="row">
+      <button class="big" id="fAgain">Try again</button>
+      <button class="ghost" id="fHome">Change level</button>
     </div>
   </section>
 </div>
@@ -769,11 +833,224 @@ function lFinish() {
   lShow("lResults");
 }
 
-// ---------- Tabs between the two trainers ----------
+// ================= Find on the neck =================
+// Hear the root then a higher note, and tap that note on the fretboard. Any place
+// with the right pitch counts; afterwards the nearest shape from the root is drawn
+// (the same ranking as the guitar interval visualiser). Levels move the root to
+// harder strings rather than adding settings (Matthew, 12/11/2026).
+const ALL12 = [1,2,3,4,5,6,7,8,9,10,11,12];
+// Rows top to bottom: high E (0) … low E (5)
+const OPEN = [64, 59, 55, 50, 45, 40];
+const SNAMES = ["E", "B", "G", "D", "A", "E"];
+const STRING_NAME = ["high E", "B", "G", "D", "A", "low E"];
+const F_LEVELS = [
+  { id:1, title:"Level 1", desc:"Root on the low E string: up to a perfect 5th", strings:[5], set:[1,2,3,4,5,7] },
+  { id:2, title:"Level 2", desc:"Root on the low E string: up to the octave", strings:[5], set:ALL12 },
+  { id:3, title:"Level 3", desc:"Root on the A string: up to the octave", strings:[4], set:ALL12 },
+  { id:4, title:"Level 4", desc:"Root on the D or G string: shapes shift at the B string", strings:[3,2], set:ALL12 },
+  { id:5, title:"Level 5", desc:"Root on any of the four lower strings", strings:[5,4,3,2], set:ALL12 },
+];
+const DEG = { 0:"R", 1:"♭2", 2:"2", 3:"♭3", 4:"3", 5:"4", 6:"♭5", 7:"5", 8:"♭6", 9:"6", 10:"♭7", 11:"7", 12:"8" };
+const NF = 12; // frets 0–12 on the board
+const fPitch = (r, f) => OPEN[r] + f;
+
+let fLevel = F_LEVELS.find(l => l.id === store.get("fLevel", 1)) || F_LEVELS[0];
+let fQueue = [], fi = 0, fRoot = null, fN = 0, fTries = TRIES, fDone = false, fResults = [], fMarks = [];
+
+// The nearest place for an interval from the root: fewest strings + frets moved
+function bestPos(rR, rF, n) {
+  const target = fPitch(rR, rF) + n, c = [];
+  for (let r = 0; r < 6; r++) for (let f = 0; f <= NF; f++) {
+    if (fPitch(r, f) === target) { const dR = r - rR, dF = f - rF; c.push({ r, f, dR, dF, score: Math.abs(dR) + Math.abs(dF) }); }
+  }
+  c.sort((a, b) => a.score - b.score || Math.abs(a.dR) - Math.abs(b.dR) || a.dR - b.dR || Math.abs(a.dF) - Math.abs(b.dF));
+  return c[0];
+}
+function shapeText(p) {
+  const up = fRoot.r - p.r, df = p.f - fRoot.f, parts = [];
+  if (up > 0) parts.push(`${up} string${up > 1 ? "s" : ""} up`);
+  else if (up < 0) parts.push(`${-up} string${-up > 1 ? "s" : ""} down`);
+  else parts.push("same string");
+  parts.push(df === 0 ? "same fret" : `${df > 0 ? "+" : "−"}${Math.abs(df)} fret${Math.abs(df) === 1 ? "" : "s"}`);
+  return parts.join(", ");
+}
+const noteOf = m => NAMES[((m % 12) + 12) % 12];
+const fretWord = f => f === 0 ? "open" : `fret ${f}`;
+
+// ---------- The board ----------
+const mL = 30, mT = 8, cellW = 44, sGap = 36;
+const fx = f => mL + f * cellW + cellW / 2, fy = r => mT + r * sGap + sGap / 2;
+const BW = mL + (NF + 1) * cellW + 6, BH = mT + 6 * sGap + 24;
+function svgEl(tag, a, txt) {
+  const e = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const k in a) e.setAttribute(k, a[k]);
+  if (txt != null) e.textContent = txt;
+  return e;
+}
+function drawBoard(link) {
+  const s = $("fBoard");
+  s.setAttribute("viewBox", `0 0 ${BW} ${BH}`);
+  s.innerHTML = "";
+  s.appendChild(svgEl("rect", { x:mL, y:mT, width:(NF + 1) * cellW, height:6 * sGap, rx:4, fill:"var(--board)" }));
+  for (let f = 0; f <= NF + 1; f++) {
+    const x = mL + f * cellW, nut = f === 1;
+    s.appendChild(svgEl("line", { x1:x, y1:mT, x2:x, y2:mT + 6 * sGap, stroke: nut ? "var(--ink)" : "var(--wire)", "stroke-width": nut ? 4 : 1.5 }));
+  }
+  [3, 5, 7, 9].forEach(f => s.appendChild(svgEl("circle", { cx:fx(f), cy:mT + 3 * sGap, r:4, fill:"var(--wire)" })));
+  [2, 4].forEach(k => s.appendChild(svgEl("circle", { cx:fx(12), cy:mT + k * sGap, r:4, fill:"var(--wire)" })));
+  for (let r = 0; r < 6; r++) {
+    s.appendChild(svgEl("line", { x1:mL, y1:fy(r), x2:mL + (NF + 1) * cellW, y2:fy(r), stroke:"var(--string)", "stroke-width": 0.6 + r * 0.35 }));
+    s.appendChild(svgEl("text", { x:mL - 8, y:fy(r) + 4, "text-anchor":"end", class:"lab" }, SNAMES[r]));
+  }
+  for (let f = 0; f <= NF; f++) s.appendChild(svgEl("text", { x:fx(f), y:mT + 6 * sGap + 17, "text-anchor":"middle", class:"lab" }, f === 0 ? "open" : f));
+  if (link) s.appendChild(svgEl("line", { x1:fx(fRoot.f), y1:fy(fRoot.r), x2:fx(link.f), y2:fy(link.r), class:"link" }));
+  [{ r:fRoot.r, f:fRoot.f, label:"R", cls:"root" }].concat(fMarks).forEach(m => {
+    const g = svgEl("g", { class:"dot " + m.cls });
+    g.appendChild(svgEl("circle", { cx:fx(m.f), cy:fy(m.r), r:15 }));
+    g.appendChild(svgEl("text", { x:fx(m.f), y:fy(m.r) + 5, "text-anchor":"middle" }, m.label));
+    s.appendChild(g);
+  });
+  // Whole cells are the tap targets, so they're as big as the board allows
+  for (let r = 0; r < 6; r++) for (let f = 0; f <= NF; f++) {
+    const c = svgEl("rect", { x:mL + f * cellW, y:mT + r * sGap, width:cellW, height:sGap, class:"cell" });
+    c.addEventListener("click", () => fTap(r, f));
+    s.appendChild(c);
+  }
+}
+
+// ---------- Screens ----------
+function fShow(id) { ["fStart", "fTest", "fResults"].forEach(s => $(s).hidden = s !== id); }
+function fMsg(cls, html) { $("fMsg").className = "msg " + cls; $("fMsg").innerHTML = html; }
+function fDots() { let h = '<span class="tries">'; for (let i = 0; i < TRIES; i++) h += `<i class="${i < fTries ? "" : "used"}"></i>`; return h + "</span>"; }
+
+function renderFindLevels() {
+  $("fLevels").innerHTML = "";
+  F_LEVELS.forEach(l => {
+    const b = document.createElement("button");
+    b.className = "level" + (l === fLevel ? " on" : "");
+    b.innerHTML = `<b>${l.title}</b><span>${l.desc} · ${l.set.length} intervals</span>`;
+    b.onclick = () => { fLevel = l; store.set("fLevel", l.id); renderFindLevels(); };
+    $("fLevels").appendChild(b);
+  });
+}
+
+function pickRoot(n) {
+  for (let i = 0; i < 200; i++) {
+    const r = fLevel.strings[Math.floor(Math.random() * fLevel.strings.length)];
+    const f = 1 + Math.floor(Math.random() * 9); // frets 1–9
+    if (fRoot && fRoot.r === r && fRoot.f === f) continue;
+    if (bestPos(r, f, n)) return { r, f };
+  }
+  return { r: fLevel.strings[0], f: 5 };
+}
+
+function fStartTest() {
+  audio();
+  fQueue = shuffle(fLevel.set.slice());
+  fi = 0; fResults = []; fRoot = null;
+  fShow("fTest");
+  fNextQ();
+}
+
+function fNextQ() {
+  if (fi >= fQueue.length) return fFinish();
+  fN = fQueue[fi];
+  fRoot = pickRoot(fN);
+  fTries = TRIES; fDone = false; fMarks = [];
+  $("fNext").hidden = true; $("fShape").hidden = true; $("fCompareHint").hidden = true;
+  $("fProgress").textContent = `Question ${fi + 1} of ${fQueue.length}`;
+  $("fBar").style.width = (fi / fQueue.length * 100) + "%";
+  $("fRootLine").innerHTML = `Root: <b>${noteOf(fPitch(fRoot.r, fRoot.f))}</b> <span class="progress">(${STRING_NAME[fRoot.r]} string, ${fretWord(fRoot.f)})</span>`;
+  fMsg("", "Listen, then tap the second note on the fretboard.");
+  drawBoard();
+  fPlay();
+}
+const fPlay = () => playSeq([fPitch(fRoot.r, fRoot.f), fPitch(fRoot.r, fRoot.f) + fN]);
+
+function fTap(r, f) {
+  const rootM = fPitch(fRoot.r, fRoot.f), m = fPitch(r, f), n = m - rootM;
+  if (r === fRoot.r && f === fRoot.f) { if (!fDone) fMsg("", "That's the root. Find the second note."); return; }
+  // Compare mode once the question is over
+  if (fDone) {
+    fMarks = fMarks.filter(x => x.cls !== "compare");
+    fMarks.push({ r, f, label: DEG[n] || "", cls: "compare" });
+    drawBoard(fReveal);
+    $("fCompareHint").textContent = n > 0 && n <= 12 ? `That's a ${name(n)}.` : n <= 0 ? "That's not above the root." : "That's more than an octave up.";
+    playSeq([rootM, m]);
+    return;
+  }
+  if (fMarks.some(x => x.r === r && x.f === f)) return; // already tried there
+  if (n === fN) {
+    fMarks.push({ r, f, label: DEG[n], cls: "right" });
+    fResults.push({ n: fN, tries: TRIES - fTries + 1 });
+    return fEnd("good", `Yes, that's a ${name(fN)}!`);
+  }
+  fTries--;
+  fMarks.push({ r, f, label: n > 0 && n <= 12 ? DEG[n] : "✗", cls: "wrong" });
+  const what = n < 0 ? "That's below the root. The second note is higher."
+    : n === 0 ? "That's the same note as the root."
+    : n > 12 ? "That's more than an octave up."
+    : `Not quite: that's a ${name(n)}.`;
+  if (fTries > 0) {
+    drawBoard();
+    fMsg("bad", `${what} ${fTries} more ${fTries === 1 ? "try" : "tries"}. ${fDots()}`);
+    fPlay();
+  } else {
+    fResults.push({ n: fN, tries: 0 });
+    fEnd("bad", `${what} It was a ${name(fN)}. Listen again…`);
+    fPlay();
+  }
+}
+
+// Draw the nearest shape from the root, and name it
+let fReveal = null;
+function fEnd(cls, text) {
+  fDone = true;
+  fReveal = bestPos(fRoot.r, fRoot.f, fN);
+  if (!fMarks.some(x => x.r === fReveal.r && x.f === fReveal.f)) fMarks.push({ r: fReveal.r, f: fReveal.f, label: DEG[fN], cls: "shape" });
+  const right = fMarks.find(x => x.cls === "right");
+  const elsewhere = right && !(right.r === fReveal.r && right.f === fReveal.f);
+  drawBoard(fReveal);
+  fMsg(cls, text);
+  const iv = INTERVALS.find(i => i.n === fN);
+  $("fShape").innerHTML = `<b>${iv.name}</b>: ${shapeText(fReveal)} from the root` +
+    (elsewhere ? `<div class="hint" style="margin-top:4px">Yours was right too. The orange dot is the nearest shape.</div>` : "") +
+    `<div class="songs">${iv.songs.join("<br>")}</div>`;
+  $("fShape").hidden = false; $("fCompareHint").hidden = false;
+  $("fCompareHint").textContent = "Tap any note to hear it after the root and see which interval it is.";
+  $("fNext").hidden = false;
+  $("fNext").textContent = fi + 1 >= fQueue.length ? "See my score →" : "Next →";
+}
+
+function fFinish() {
+  stopAll();
+  $("fBar").style.width = "100%";
+  const first = fResults.filter(r => r.tries === 1).length;
+  const got = fResults.filter(r => r.tries > 0).length;
+  $("fScore").textContent = `${got} / ${fResults.length}`;
+  $("fScoreNote").textContent = `${first} first time, ${got - first} after another try, ${fResults.length - got} to keep working on.`;
+  const verdict = r => r.tries === 0 ? '<span class="no">Missed</span>'
+    : r.tries === 1 ? '<span class="ok">First try</span>' : `<span class="ok">Try ${r.tries}</span>`;
+  $("fBreakdown").innerHTML = INTERVALS.filter(i => fLevel.set.includes(i.n)).map(i =>
+    `<tr><td>${i.name}</td><td class="r">${verdict(fResults.find(x => x.n === i.n))}</td></tr>`).join("");
+  fShow("fResults");
+}
+
+$("fGo").onclick = fStartTest;
+$("fAgain").onclick = fStartTest;
+$("fHome").onclick = () => { renderFindLevels(); fShow("fStart"); };
+$("fQuit").onclick = () => { stopAll(); renderFindLevels(); fShow("fStart"); };
+$("fReplay").onclick = fPlay;
+$("fNext").onclick = () => { fi++; fNextQ(); };
+renderFindLevels();
+
+// ---------- Tabs between the trainers ----------
 function setTab(t) {
+  if (!["intervals", "find", "licks"].includes(t)) t = "intervals";
   store.set("tab", t);
   document.querySelectorAll(".tabs .pill").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
   $("intervalsApp").hidden = t !== "intervals";
+  $("findApp").hidden = t !== "find";
   $("licksApp").hidden = t !== "licks";
   stopLick();
 }
