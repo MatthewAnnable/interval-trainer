@@ -110,12 +110,11 @@
   .rootline { font-size:15px; margin:0 0 8px; } .rootline b { font-size:20px; }
   .shapecard b { font-size:17px; } .shapecard .songs { color:var(--mute); font-size:14px; margin-top:4px; }
   /* Learn */
-  .fb .g-perfect circle { fill:#1d9e75; } .fb .g-major circle { fill:#357fd0; }
-  .fb .g-minor circle { fill:#d85a30; } .fb .g-tri circle { fill:#8a7f72; }
-  .fb .g-perfect text, .fb .g-major text, .fb .g-minor text, .fb .g-tri text { fill:#fff; }
-  .pill .sw { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px; vertical-align:0; }
-  .pill.on .sw { box-shadow:0 0 0 1.5px var(--bg); }
-  #lnGroups .pill:not(.on) { opacity:.55; }
+  .fb .g-both circle { fill:#1d9e75; } .fb .g-major circle { fill:#357fd0; }
+  .fb .g-minor circle { fill:#d85a30; } .fb .g-none circle { fill:#8a7f72; }
+  .fb .g-both text, .fb .g-major text, .fb .g-minor text, .fb .g-none text { fill:#fff; }
+  .sw { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:5px; }
+  .lnkey { display:flex; flex-wrap:wrap; gap:4px 14px; color:var(--mute); font-size:13px; margin:8px 2px 0; }
   .lnlist { display:grid; grid-template-columns:1fr 1fr; gap:4px 14px; margin:12px 0 4px; }
   @media (max-width:600px) { .lnlist { grid-template-columns:1fr; } }
   .lrow { display:flex; align-items:center; gap:11px; padding:8px; border-radius:10px; border:1.5px solid transparent; background:none; text-align:left; }
@@ -194,14 +193,20 @@
   </div>
   <div class="row" id="lnGroups" style="margin-bottom:12px">
     <span class="progress">Show:</span>
-    <button class="pill on" data-grp="perfect"><i class="sw" style="background:#1d9e75"></i>Perfect</button>
-    <button class="pill on" data-grp="major"><i class="sw" style="background:#357fd0"></i>Major</button>
-    <button class="pill on" data-grp="minor"><i class="sw" style="background:#d85a30"></i>Minor</button>
-    <button class="pill on" data-grp="tri"><i class="sw" style="background:#8a7f72"></i>Tritone</button>
+    <button class="pill" data-show="major">Major scale</button>
+    <button class="pill" data-show="minor">Minor scale</button>
+    <button class="pill" data-show="all">All notes</button>
+    <button class="pill" data-show="none">Hide all</button>
   </div>
   <div class="rootline" id="lnRoot"></div>
   <p class="hint narrow-only" style="margin:0 0 6px">Turn your phone sideways for a bigger fretboard.</p>
   <svg class="fb" id="lnBoard" role="img" aria-label="Guitar fretboard showing every interval from the root. Tap a note to move the root."></svg>
+  <div class="lnkey">
+    <span><i class="sw" style="background:#1d9e75"></i>in both scales</span>
+    <span><i class="sw" style="background:#357fd0"></i>major scale only</span>
+    <span><i class="sw" style="background:#d85a30"></i>minor scale only</span>
+    <span><i class="sw" style="background:#8a7f72"></i>in neither</span>
+  </div>
   <div class="lnlist" id="lnList"></div>
   <p class="hint" id="lnFoot"></p>
 </div>
@@ -1094,11 +1099,16 @@ renderFindLevels();
 // The guitar interval visualiser, with two views of the same intervals:
 // along the root's own string (just fret counts) and in one hand position
 // (the nearest place across the strings). Matthew, 13/11/2026.
-const GRP_COLOR = { perfect:"#1d9e75", major:"#357fd0", minor:"#d85a30", tri:"#8a7f72" };
-const grpOf = n => [5, 7, 12].includes(n) ? "perfect" : n === 6 ? "tri" : [2, 4, 9, 11].includes(n) ? "major" : "minor";
+// Colours and buttons follow the scales students already know, not the interval
+// names: "minor 2nd" isn't in the minor scale and "major 2nd" is in both, which
+// confused things when the groups were Perfect/Major/Minor (Matthew, 13/11/2026).
+const GRP_COLOR = { both:"#1d9e75", major:"#357fd0", minor:"#d85a30", none:"#8a7f72" };
+const grpOf = n => [2, 5, 7, 12].includes(n) ? "both" : [4, 9, 11].includes(n) ? "major" : [3, 8, 10].includes(n) ? "minor" : "none";
+const SHOWS = { major:["both", "major"], minor:["both", "minor"], all:["both", "major", "minor", "none"], none:[] };
 let lnRoot = store.get("lnRoot", { r:5, f:5 });
 let lnMode = store.get("lnMode", "position");
-let lnShow = { perfect:true, major:true, minor:true, tri:true };
+let lnShowSet = SHOWS[store.get("lnShow", "all")] ? store.get("lnShow", "all") : "all";
+const lnShow = {};
 let lnActive = null;
 
 // Where each interval goes in the current view (frets up to 24)
@@ -1109,7 +1119,8 @@ function lnPos(n) {
 function renderLearn() {
   if (lnMode === "string" && lnRoot.f > 12) lnRoot = { r: lnRoot.r, f: lnRoot.f - 12 };
   document.querySelectorAll("#lnModes .pill").forEach(b => b.classList.toggle("on", b.dataset.mode === lnMode));
-  document.querySelectorAll("#lnGroups .pill").forEach(b => b.classList.toggle("on", lnShow[b.dataset.grp]));
+  document.querySelectorAll("#lnGroups .pill").forEach(b => b.classList.toggle("on", b.dataset.show === lnShowSet));
+  Object.keys(GRP_COLOR).forEach(g => lnShow[g] = SHOWS[lnShowSet].includes(g));
   const pos = {};
   ALL12.forEach(n => pos[n] = lnPos(n));
   // Slide the board up the neck only when the notes don't fit in frets 0–12
@@ -1136,6 +1147,7 @@ function renderLearn() {
   $("lnFoot").textContent = lnMode === "string"
     ? "Along one string, every interval is just a number of frets: a minor 2nd is 1 fret, a major 3rd is 4, a perfect 5th is 7 and the octave is 12. That's a long way to stretch, so switch to In one hand position to see the same notes moved across the strings."
     : "In one hand position, each note is moved onto a higher string so your hand doesn't have to travel. Going up a string takes 5 frets off the distance (4 when you cross from the G string to the B string). Switch to Along one string to compare.";
+  $("lnFoot").textContent += " Interval names compare with the major scale: minor means one fret smaller than major, not 'from the minor scale'.";
 }
 
 function lnTap(r, f) {
@@ -1146,7 +1158,7 @@ function lnTap(r, f) {
 }
 
 document.querySelectorAll("#lnModes .pill").forEach(b => b.onclick = () => { lnMode = b.dataset.mode; store.set("lnMode", lnMode); renderLearn(); });
-document.querySelectorAll("#lnGroups .pill").forEach(b => b.onclick = () => { lnShow[b.dataset.grp] = !lnShow[b.dataset.grp]; renderLearn(); });
+document.querySelectorAll("#lnGroups .pill").forEach(b => b.onclick = () => { lnShowSet = b.dataset.show; store.set("lnShow", lnShowSet); lnActive = null; renderLearn(); });
 renderLearn();
 
 // ---------- Tabs between the trainers ----------
