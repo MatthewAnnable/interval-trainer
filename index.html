@@ -109,6 +109,21 @@
   @media (prefers-color-scheme: dark) { .fb .dot text { fill:#181614; } .fb .root text { fill:var(--bg); } }
   .rootline { font-size:15px; margin:0 0 8px; } .rootline b { font-size:20px; }
   .shapecard b { font-size:17px; } .shapecard .songs { color:var(--mute); font-size:14px; margin-top:4px; }
+  /* Learn */
+  .fb .g-perfect circle { fill:#1d9e75; } .fb .g-major circle { fill:#357fd0; }
+  .fb .g-minor circle { fill:#d85a30; } .fb .g-tri circle { fill:#8a7f72; }
+  .fb .g-perfect text, .fb .g-major text, .fb .g-minor text, .fb .g-tri text { fill:#fff; }
+  .pill .sw { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px; vertical-align:0; }
+  .pill.on .sw { box-shadow:0 0 0 1.5px var(--bg); }
+  #lnGroups .pill:not(.on) { opacity:.55; }
+  .lnlist { display:grid; grid-template-columns:1fr 1fr; gap:4px 14px; margin:12px 0 4px; }
+  @media (max-width:600px) { .lnlist { grid-template-columns:1fr; } }
+  .lrow { display:flex; align-items:center; gap:11px; padding:8px; border-radius:10px; border:1.5px solid transparent; background:none; text-align:left; }
+  .lrow.on { border-color:var(--accent); background:var(--card); }
+  .lchip { width:30px; height:30px; flex:0 0 auto; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:700; color:#fff; }
+  .lchip.hollow { background:none !important; border:2px dashed; }
+  .lrow .t { font-size:14px; line-height:1.35; } .lrow .t .m { color:var(--mute); }
+  .lrow .t .s { display:block; font-size:13px; color:var(--mute); }
   .narrow-only { display:none; }
   @media (max-width:600px) and (orientation:portrait) { .narrow-only { display:block; } }
   [hidden] { display:none !important; }
@@ -122,7 +137,7 @@
 <body>
 <div class="wrap">
   <h1>Ear Trainer</h1>
-  <div class="tabs"><button class="pill" data-tab="intervals">Intervals</button><button class="pill" data-tab="find">Find on the neck</button><button class="pill" data-tab="licks">Pentatonic licks</button></div>
+  <div class="tabs"><button class="pill" data-tab="learn">Learn</button><button class="pill" data-tab="intervals">Intervals</button><button class="pill" data-tab="find">Find on the neck</button><button class="pill" data-tab="licks">Pentatonic licks</button></div>
 
 <div id="intervalsApp">
   <p class="sub" id="ivSub">Listen to two notes and work out the jump between them.</p>
@@ -169,6 +184,26 @@
       <button class="ghost" id="home">Change level</button>
     </div>
   </section>
+</div>
+
+<div id="learnApp" hidden>
+  <p class="sub">Every interval from the root, all in one place. Tap any note on the fretboard to make it the root. Tap an interval in the list to hear it and see where it is.</p>
+  <div class="row" id="lnModes" style="margin-bottom:12px">
+    <button class="pill" data-mode="string">Along one string</button>
+    <button class="pill" data-mode="position">In one hand position</button>
+  </div>
+  <div class="row" id="lnGroups" style="margin-bottom:12px">
+    <span class="progress">Show:</span>
+    <button class="pill on" data-grp="perfect"><i class="sw" style="background:#1d9e75"></i>Perfect</button>
+    <button class="pill on" data-grp="major"><i class="sw" style="background:#357fd0"></i>Major</button>
+    <button class="pill on" data-grp="minor"><i class="sw" style="background:#d85a30"></i>Minor</button>
+    <button class="pill on" data-grp="tri"><i class="sw" style="background:#8a7f72"></i>Tritone</button>
+  </div>
+  <div class="rootline" id="lnRoot"></div>
+  <p class="hint narrow-only" style="margin:0 0 6px">Turn your phone sideways for a bigger fretboard.</p>
+  <svg class="fb" id="lnBoard" role="img" aria-label="Guitar fretboard showing every interval from the root. Tap a note to move the root."></svg>
+  <div class="lnlist" id="lnList"></div>
+  <p class="hint" id="lnFoot"></p>
 </div>
 
 <div id="findApp" hidden>
@@ -858,16 +893,17 @@ let fLevel = F_LEVELS.find(l => l.id === store.get("fLevel", 1)) || F_LEVELS[0];
 let fQueue = [], fi = 0, fRoot = null, fN = 0, fTries = TRIES, fDone = false, fResults = [], fMarks = [];
 
 // The nearest place for an interval from the root: fewest strings + frets moved
-function bestPos(rR, rF, n) {
+function bestPos(rR, rF, n, maxF = NF) {
   const target = fPitch(rR, rF) + n, c = [];
-  for (let r = 0; r < 6; r++) for (let f = 0; f <= NF; f++) {
+  for (let r = 0; r < 6; r++) for (let f = 0; f <= maxF; f++) {
     if (fPitch(r, f) === target) { const dR = r - rR, dF = f - rF; c.push({ r, f, dR, dF, score: Math.abs(dR) + Math.abs(dF) }); }
   }
   c.sort((a, b) => a.score - b.score || Math.abs(a.dR) - Math.abs(b.dR) || a.dR - b.dR || Math.abs(a.dF) - Math.abs(b.dF));
   return c[0];
 }
-function shapeText(p) {
-  const up = fRoot.r - p.r, df = p.f - fRoot.f, parts = [];
+const shapeText = p => shapeFrom(fRoot, p);
+function shapeFrom(root, p) {
+  const up = root.r - p.r, df = p.f - root.f, parts = [];
   if (up > 0) parts.push(`${up} string${up > 1 ? "s" : ""} up`);
   else if (up < 0) parts.push(`${-up} string${-up > 1 ? "s" : ""} down`);
   else parts.push("same string");
@@ -887,36 +923,46 @@ function svgEl(tag, a, txt) {
   if (txt != null) e.textContent = txt;
   return e;
 }
-function drawBoard(link) {
-  const s = $("fBoard");
+// One fretboard drawing for both Learn and Find. It shows 13 frets starting at
+// `start` (0 = the open strings and the nut), so Learn can slide up the neck.
+// marks: {r, f, label, cls}; link: {r, f, color?} draws a dashed line from the root.
+function drawFret(s, { start = 0, root, marks = [], link = null, onTap }) {
+  const x = f => fx(f - start);
   s.setAttribute("viewBox", `0 0 ${BW} ${BH}`);
   s.innerHTML = "";
   s.appendChild(svgEl("rect", { x:mL, y:mT, width:(NF + 1) * cellW, height:6 * sGap, rx:4, fill:"var(--board)" }));
-  for (let f = 0; f <= NF + 1; f++) {
-    const x = mL + f * cellW, nut = f === 1;
-    s.appendChild(svgEl("line", { x1:x, y1:mT, x2:x, y2:mT + 6 * sGap, stroke: nut ? "var(--ink)" : "var(--wire)", "stroke-width": nut ? 4 : 1.5 }));
+  for (let k = 0; k <= NF + 1; k++) {
+    const nut = start === 0 && k === 1;
+    s.appendChild(svgEl("line", { x1:mL + k * cellW, y1:mT, x2:mL + k * cellW, y2:mT + 6 * sGap, stroke: nut ? "var(--ink)" : "var(--wire)", "stroke-width": nut ? 4 : 1.5 }));
   }
-  [3, 5, 7, 9].forEach(f => s.appendChild(svgEl("circle", { cx:fx(f), cy:mT + 3 * sGap, r:4, fill:"var(--wire)" })));
-  [2, 4].forEach(k => s.appendChild(svgEl("circle", { cx:fx(12), cy:mT + k * sGap, r:4, fill:"var(--wire)" })));
+  for (let f = start; f <= start + NF; f++) {
+    if ([3, 5, 7, 9, 15, 17, 19, 21].includes(f)) s.appendChild(svgEl("circle", { cx:x(f), cy:mT + 3 * sGap, r:4, fill:"var(--wire)" }));
+    if (f === 12 || f === 24) [2, 4].forEach(k => s.appendChild(svgEl("circle", { cx:x(f), cy:mT + k * sGap, r:4, fill:"var(--wire)" })));
+    s.appendChild(svgEl("text", { x:x(f), y:mT + 6 * sGap + 17, "text-anchor":"middle", class:"lab" }, f === 0 ? "open" : f));
+  }
   for (let r = 0; r < 6; r++) {
     s.appendChild(svgEl("line", { x1:mL, y1:fy(r), x2:mL + (NF + 1) * cellW, y2:fy(r), stroke:"var(--string)", "stroke-width": 0.6 + r * 0.35 }));
     s.appendChild(svgEl("text", { x:mL - 8, y:fy(r) + 4, "text-anchor":"end", class:"lab" }, SNAMES[r]));
   }
-  for (let f = 0; f <= NF; f++) s.appendChild(svgEl("text", { x:fx(f), y:mT + 6 * sGap + 17, "text-anchor":"middle", class:"lab" }, f === 0 ? "open" : f));
-  if (link) s.appendChild(svgEl("line", { x1:fx(fRoot.f), y1:fy(fRoot.r), x2:fx(link.f), y2:fy(link.r), class:"link" }));
-  [{ r:fRoot.r, f:fRoot.f, label:"R", cls:"root" }].concat(fMarks).forEach(m => {
+  if (link) {
+    const st = link.color ? { stroke: link.color } : {};
+    s.appendChild(svgEl("line", { x1:x(root.f), y1:fy(root.r), x2:x(link.f), y2:fy(link.r), class:"link", ...st }));
+    if (link.color) s.appendChild(svgEl("circle", { cx:x(link.f), cy:fy(link.r), r:20, fill:"none", stroke:link.color, "stroke-width":2.5 }));
+  }
+  [{ r:root.r, f:root.f, label:"R", cls:"root" }].concat(marks).forEach(m => {
     const g = svgEl("g", { class:"dot " + m.cls });
-    g.appendChild(svgEl("circle", { cx:fx(m.f), cy:fy(m.r), r:15 }));
-    g.appendChild(svgEl("text", { x:fx(m.f), y:fy(m.r) + 5, "text-anchor":"middle" }, m.label));
+    g.appendChild(svgEl("circle", { cx:x(m.f), cy:fy(m.r), r:15 }));
+    g.appendChild(svgEl("text", { x:x(m.f), y:fy(m.r) + 5, "text-anchor":"middle" }, m.label));
     s.appendChild(g);
   });
   // Whole cells are the tap targets, so they're as big as the board allows
-  for (let r = 0; r < 6; r++) for (let f = 0; f <= NF; f++) {
-    const c = svgEl("rect", { x:mL + f * cellW, y:mT + r * sGap, width:cellW, height:sGap, class:"cell" });
-    c.addEventListener("click", () => fTap(r, f));
+  for (let r = 0; r < 6; r++) for (let k = 0; k <= NF; k++) {
+    const c = svgEl("rect", { x:mL + k * cellW, y:mT + r * sGap, width:cellW, height:sGap, class:"cell" });
+    c.addEventListener("click", () => onTap(r, start + k));
     s.appendChild(c);
   }
 }
+const drawBoard = link => drawFret($("fBoard"), { root: fRoot, marks: fMarks, link, onTap: fTap });
 
 // ---------- Screens ----------
 function fShow(id) { ["fStart", "fTest", "fResults"].forEach(s => $(s).hidden = s !== id); }
@@ -1044,11 +1090,71 @@ $("fReplay").onclick = fPlay;
 $("fNext").onclick = () => { fi++; fNextQ(); };
 renderFindLevels();
 
+// ================= Learn =================
+// The guitar interval visualiser, with two views of the same intervals:
+// along the root's own string (just fret counts) and in one hand position
+// (the nearest place across the strings). Matthew, 13/11/2026.
+const GRP_COLOR = { perfect:"#1d9e75", major:"#357fd0", minor:"#d85a30", tri:"#8a7f72" };
+const grpOf = n => [5, 7, 12].includes(n) ? "perfect" : n === 6 ? "tri" : [2, 4, 9, 11].includes(n) ? "major" : "minor";
+let lnRoot = store.get("lnRoot", { r:5, f:5 });
+let lnMode = store.get("lnMode", "position");
+let lnShow = { perfect:true, major:true, minor:true, tri:true };
+let lnActive = null;
+
+// Where each interval goes in the current view (frets up to 24)
+function lnPos(n) {
+  return lnMode === "string" ? { r: lnRoot.r, f: lnRoot.f + n } : bestPos(lnRoot.r, lnRoot.f, n, 24);
+}
+
+function renderLearn() {
+  if (lnMode === "string" && lnRoot.f > 12) lnRoot = { r: lnRoot.r, f: lnRoot.f - 12 };
+  document.querySelectorAll("#lnModes .pill").forEach(b => b.classList.toggle("on", b.dataset.mode === lnMode));
+  document.querySelectorAll("#lnGroups .pill").forEach(b => b.classList.toggle("on", lnShow[b.dataset.grp]));
+  const pos = {};
+  ALL12.forEach(n => pos[n] = lnPos(n));
+  // Slide the board up the neck only when the notes don't fit in frets 0–12
+  const frets = [lnRoot.f].concat(ALL12.map(n => pos[n].f));
+  const start = Math.min(Math.min(...frets), Math.max(0, Math.max(...frets) - NF));
+  const marks = ALL12.filter(n => lnShow[grpOf(n)] || n === lnActive)
+    .map(n => ({ r: pos[n].r, f: pos[n].f, label: DEG[n], cls: "g-" + grpOf(n) }));
+  const link = lnActive ? { r: pos[lnActive].r, f: pos[lnActive].f, color: GRP_COLOR[grpOf(lnActive)] } : null;
+  drawFret($("lnBoard"), { start, root: lnRoot, marks, link, onTap: lnTap });
+
+  const rootM = fPitch(lnRoot.r, lnRoot.f);
+  $("lnRoot").innerHTML = `Root: <b>${noteOf(rootM)}</b> <span class="progress">(${STRING_NAME[lnRoot.r]} string, ${fretWord(lnRoot.f)})</span>`;
+  $("lnList").innerHTML = "";
+  ALL12.forEach(n => {
+    const g = grpOf(n), shown = lnShow[g], p = pos[n];
+    const b = document.createElement("button");
+    b.className = "lrow" + (lnActive === n ? " on" : "");
+    const shape = lnMode === "string" ? `same string, +${n} fret${n > 1 ? "s" : ""}` : shapeFrom(lnRoot, p);
+    b.innerHTML = `<span class="lchip${shown ? "" : " hollow"}" style="${shown ? `background:${GRP_COLOR[g]}` : `color:${GRP_COLOR[g]};border-color:${GRP_COLOR[g]}`}">${DEG[n]}</span>` +
+      `<span class="t"><b>${name(n)}</b> <span class="m">– ${noteOf(rootM + n)}</span><span class="s">${shape}</span></span>`;
+    b.onclick = () => { lnActive = lnActive === n ? null : n; if (lnActive) { audio(); playSeq([rootM, rootM + n]); } renderLearn(); };
+    $("lnList").appendChild(b);
+  });
+  $("lnFoot").textContent = lnMode === "string"
+    ? "Along one string, every interval is just a number of frets: a minor 2nd is 1 fret, a major 3rd is 4, a perfect 5th is 7 and the octave is 12. That's a long way to stretch, so switch to In one hand position to see the same notes moved across the strings."
+    : "In one hand position, each note is moved onto a higher string so your hand doesn't have to travel. Going up a string takes 5 frets off the distance (4 when you cross from the G string to the B string). Switch to Along one string to compare.";
+}
+
+function lnTap(r, f) {
+  lnRoot = { r, f }; lnActive = null;
+  store.set("lnRoot", lnRoot);
+  audio(); playSeq([fPitch(r, f)]);
+  renderLearn();
+}
+
+document.querySelectorAll("#lnModes .pill").forEach(b => b.onclick = () => { lnMode = b.dataset.mode; store.set("lnMode", lnMode); renderLearn(); });
+document.querySelectorAll("#lnGroups .pill").forEach(b => b.onclick = () => { lnShow[b.dataset.grp] = !lnShow[b.dataset.grp]; renderLearn(); });
+renderLearn();
+
 // ---------- Tabs between the trainers ----------
 function setTab(t) {
-  if (!["intervals", "find", "licks"].includes(t)) t = "intervals";
+  if (!["learn", "intervals", "find", "licks"].includes(t)) t = "intervals";
   store.set("tab", t);
   document.querySelectorAll(".tabs .pill").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
+  $("learnApp").hidden = t !== "learn";
   $("intervalsApp").hidden = t !== "intervals";
   $("findApp").hidden = t !== "find";
   $("licksApp").hidden = t !== "licks";
