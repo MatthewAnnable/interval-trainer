@@ -123,6 +123,12 @@
   .lchip.hollow { background:none !important; border:2px dashed; }
   .lrow .t { font-size:14px; line-height:1.35; } .lrow .t .m { color:var(--mute); }
   .lrow .t .s { display:block; font-size:13px; color:var(--mute); }
+  /* Play on guitar */
+  .ask { font-size:22px; margin:6px 0 0; display:flex; align-items:center; gap:10px; min-height:40px; }
+  .ask .lchip { width:40px; height:40px; font-size:16px; background:var(--accent); }
+  .meter { height:8px; background:var(--chip); border-radius:4px; overflow:hidden; margin:8px 0 10px; }
+  .meter i { display:block; height:100%; width:0; background:var(--good); transition:width .05s; }
+  .mic input[type=range] { width:100%; margin-top:4px; }
   .narrow-only { display:none; }
   @media (max-width:600px) and (orientation:portrait) { .narrow-only { display:block; } }
   [hidden] { display:none !important; }
@@ -136,7 +142,7 @@
 <body>
 <div class="wrap">
   <h1>Ear Trainer</h1>
-  <div class="tabs"><button class="pill" data-tab="learn">Learn</button><button class="pill" data-tab="intervals">Intervals</button><button class="pill" data-tab="find">Find on the neck</button><button class="pill" data-tab="licks">Pentatonic licks</button></div>
+  <div class="tabs"><button class="pill" data-tab="learn">Learn</button><button class="pill" data-tab="intervals">Intervals</button><button class="pill" data-tab="find">Find on the neck</button><button class="pill" data-tab="play">Play on guitar</button><button class="pill" data-tab="licks">Pentatonic licks</button></div>
 
 <div id="intervalsApp">
   <p class="sub" id="ivSub">Listen to two notes and work out the jump between them.</p>
@@ -251,6 +257,57 @@
     <div class="row">
       <button class="big" id="fAgain">Try again</button>
       <button class="ghost" id="fHome">Change level</button>
+    </div>
+  </section>
+</div>
+
+<div id="playApp" hidden>
+  <p class="sub">The app shows and plays a root note. Play the interval it asks for on your guitar, above the root and within an octave. It listens through the microphone.</p>
+
+  <section id="pStart">
+    <div class="levels" id="pLevels"></div>
+    <div class="card">
+      <p class="hint" style="margin:0">Every interval in the level comes up once, in a random order, all from the same root. Play single notes and let each one ring. You get three tries at each one. If you miss, the app shows you where it is, and you play it to move on. No timer.</p>
+      <p class="hint">Allow the microphone when your browser asks. Tune up first: the app checks the exact note.</p>
+    </div>
+    <button class="big" id="pGo">Start the test</button>
+  </section>
+
+  <section id="pTest" hidden>
+    <div class="top">
+      <span class="progress" id="pProgress"></span>
+      <button class="pill" id="pQuit">Stop</button>
+    </div>
+    <div class="bar"><i id="pBar"></i></div>
+    <div class="ask" id="pAsk"></div>
+    <div class="msg" id="pMsg"></div>
+    <div class="play">
+      <button class="ghost" id="pRootBtn">▶ Hear the root</button>
+      <button class="ghost" id="pSkip" hidden>Skip</button>
+      <button class="big" id="pNext" hidden>Next →</button>
+    </div>
+    <div class="rootline" id="pRootLine" style="margin-top:12px"></div>
+    <p class="hint narrow-only" style="margin:0 0 6px">Turn your phone sideways for a bigger fretboard.</p>
+    <svg class="fb" id="pBoard" role="img" aria-label="Guitar fretboard showing the root note"></svg>
+    <div class="card shapecard" id="pShape" hidden></div>
+    <div class="card mic">
+      <div class="row" style="justify-content:space-between"><span class="progress" id="pHeard">Heard: –</span></div>
+      <div class="meter"><i id="pLevel"></i></div>
+      <label class="progress" for="pGate">Sensitivity (move right if it isn't hearing you)</label>
+      <input id="pGate" type="range" min="0" max="100" value="70">
+    </div>
+  </section>
+
+  <section id="pResults" hidden>
+    <div class="card">
+      <div class="progress">Your score</div>
+      <div class="result-big" id="pScore"></div>
+      <div id="pScoreNote" class="hint" style="margin-top:0"></div>
+    </div>
+    <div class="card"><table id="pBreakdown"></table></div>
+    <div class="row">
+      <button class="big" id="pAgain">Try again (new root)</button>
+      <button class="ghost" id="pHome">Change level</button>
     </div>
   </section>
 </div>
@@ -1161,9 +1218,255 @@ document.querySelectorAll("#lnModes .pill").forEach(b => b.onclick = () => { lnM
 document.querySelectorAll("#lnGroups .pill").forEach(b => b.onclick = () => { lnShowSet = b.dataset.show; store.set("lnShow", lnShowSet); lnActive = null; renderLearn(); });
 renderLearn();
 
+// ================= Play on guitar =================
+// The app shows and plays a root, asks for an interval, and listens until the
+// student plays it. Pitch detection and the note tracker are the Classical Note
+// Trainer's (single held notes, which it hears well on a real guitar); the mic
+// marking that failed was for whole licks. Matthew, 13/11/2026.
+let pLevel = F_LEVELS.find(l => l.id === store.get("pLevel", 1)) || F_LEVELS[0];
+let pQueue = [], pi = 0, pRoot = null, pN = 0, pTries = TRIES, pResults = [];
+let pState = "off";   // off | settling | ask | practice | done
+let pIgnoreUntil = 0, pTimer = null;
+const pRootM = () => fPitch(pRoot.r, pRoot.f);
+
+// ---------- Pitch detection (McLeod normalised square difference) ----------
+function detectPitch(buf, sr) {
+  const n = buf.length, maxTau = Math.min(n >> 1, Math.floor(sr / 70)), minTau = Math.floor(sr / 1000);
+  const nsdf = new Float32Array(maxTau);
+  let sq = 0; for (let i = 0; i < n; i++) sq += buf[i] * buf[i];
+  let m = 2 * sq;
+  for (let tau = 0; tau < maxTau; tau++) {
+    let acf = 0;
+    for (let i = 0; i < n - tau; i++) acf += buf[i] * buf[i + tau];
+    nsdf[tau] = m > 0 ? 2 * acf / m : 0;
+    m -= buf[tau] * buf[tau] + buf[n - 1 - tau] * buf[n - 1 - tau];
+  }
+  const peaks = [];
+  let tau = 1;
+  while (tau < maxTau - 1 && nsdf[tau] > 0) tau++;
+  while (tau < maxTau - 1) {
+    while (tau < maxTau - 1 && nsdf[tau] <= 0) tau++;
+    let best = -1;
+    while (tau < maxTau - 1 && nsdf[tau] > 0) { if (best < 0 || nsdf[tau] > nsdf[best]) best = tau; tau++; }
+    if (best > 0 && best >= minTau && nsdf[best] > nsdf[best - 1] && nsdf[best] >= nsdf[best + 1]) peaks.push(best);
+  }
+  if (!peaks.length) return null;
+  let maxVal = 0; for (const p of peaks) maxVal = Math.max(maxVal, nsdf[p]);
+  const pick = peaks.find(p => nsdf[p] >= 0.9 * maxVal);
+  const a = nsdf[pick - 1], b = nsdf[pick], c = nsdf[pick + 1];
+  const shift = (a - c) / (2 * (a - 2 * b + c) || 1);
+  return { freq: sr / (pick + shift), clarity: b };
+}
+const hzToMidi = hz => 69 + 12 * Math.log2(hz / 440);
+
+// ---------- Turning pitches into "played a note" events ----------
+// A note counts once it has been steady for 3 frames (~150ms) if right, 4 if
+// wrong. Each held note fires once, so a ringing string is one event.
+const pSeg = { key: null, frames: 0, fired: false };
+let pGap = 0;
+function pFeed(midi) {
+  if (midi == null) { if (++pGap >= 2) { pSeg.key = null; pSeg.frames = 0; pSeg.fired = false; } return; }
+  pGap = 0;
+  const target = pRootM() + pN, correct = Math.abs(midi - target) < 0.5;
+  const key = correct ? target : Math.round(midi);
+  if (key !== pSeg.key) { pSeg.key = key; pSeg.frames = 0; pSeg.fired = false; }
+  pSeg.frames++;
+  if (pSeg.fired) return;
+  if (correct && pSeg.frames >= 3) { pSeg.fired = true; pRight(); }
+  else if (!correct && pSeg.frames >= 4) { pSeg.fired = true; pWrong(key); }
+}
+
+// ---------- Microphone ----------
+// Safari, and every browser on an iPhone, reads about a semitone sharp for up
+// to 20 seconds after the mic opens (see the singing ladder), so it waits.
+const isWebKit = /Safari/.test(navigator.userAgent) && !/Chrome|Chromium|Edg|Firefox/.test(navigator.userAgent);
+const MIC_SETTLE = 20000;
+let micOn = false, micAt = 0, analyser = null, micBuf = null, micLast = 0;
+$("pGate").value = store.get("pGate", 70);
+$("pGate").oninput = () => store.set("pGate", +$("pGate").value);
+
+async function ensureMic() {
+  audio();
+  if (micOn) return true;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    pMsg("bad", "This browser can't reach the microphone. Try Chrome or Safari.");
+    return false;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true } });
+    if (ctx.state === "suspended") await ctx.resume();
+    analyser = ctx.createAnalyser(); analyser.fftSize = 4096;
+    ctx.createMediaStreamSource(stream).connect(analyser);
+    micBuf = new Float32Array(analyser.fftSize);
+    micOn = true; micAt = performance.now();
+    requestAnimationFrame(micLoop);
+    return true;
+  } catch (e) {
+    pMsg("bad", `Couldn't use the microphone (${e.message || e.name}). Allow it in your browser and try again.`);
+    return false;
+  }
+}
+
+function micLoop(t) {
+  requestAnimationFrame(micLoop);
+  if (t - micLast < 50 || $("playApp").hidden || $("pTest").hidden) return;
+  micLast = t;
+  analyser.getFloatTimeDomainData(micBuf);
+  let s = 0; for (let i = 0; i < micBuf.length; i++) s += micBuf[i] * micBuf[i];
+  const rms = Math.sqrt(s / micBuf.length);
+  $("pLevel").style.width = Math.min(100, Math.sqrt(rms) * 220) + "%";
+  const gate = 0.02 * Math.pow(0.035, $("pGate").value / 100);
+  if (rms < gate) { pFeed(null); $("pHeard").textContent = "Heard: – (too quiet? move Sensitivity right)"; return; }
+  const r = detectPitch(micBuf, ctx.sampleRate);
+  if (!r || r.clarity < 0.8 || r.freq < 70 || r.freq > 1000) { pFeed(null); $("pHeard").textContent = "Heard: sound, but no clear note"; return; }
+  const midi = hzToMidi(r.freq), rd = Math.round(midi);
+  $("pHeard").textContent = `Heard: ${noteOf(rd)}${Math.floor(rd / 12) - 1}`;
+  // Ignore the app's own root while it sounds, and the student checking the root
+  if (performance.now() < pIgnoreUntil || !["ask", "practice"].includes(pState)) { pFeed(null); return; }
+  pFeed(midi);
+}
+
+// ---------- Sound: the root, damped after a second so the mic hears the student ----------
+function pPlayRoot() {
+  audio(); stopAll();
+  const t = ctx.currentTime + 0.05, g = playNote(pRootM(), t);
+  g.gain.setValueAtTime(0.55, t + 1.0); g.gain.linearRampToValueAtTime(0, t + 1.1);
+  pIgnoreUntil = performance.now() + 1400;
+  pSeg.key = null; pSeg.frames = 0; pSeg.fired = false;
+}
+
+// ---------- Screens ----------
+function pShow(id) { ["pStart", "pTest", "pResults"].forEach(s => $(s).hidden = s !== id); }
+function pMsg(cls, html) { $("pMsg").className = "msg " + cls; $("pMsg").innerHTML = html; }
+function pDots() { let h = '<span class="tries">'; for (let i = 0; i < TRIES; i++) h += `<i class="${i < pTries ? "" : "used"}"></i>`; return h + "</span>"; }
+
+function renderPlayLevels() {
+  $("pLevels").innerHTML = "";
+  F_LEVELS.forEach(l => {
+    const b = document.createElement("button");
+    b.className = "level" + (l === pLevel ? " on" : "");
+    b.innerHTML = `<b>${l.title}</b><span>${l.desc} · ${l.set.length} intervals</span>`;
+    b.onclick = () => { pLevel = l; store.set("pLevel", l.id); renderPlayLevels(); };
+    $("pLevels").appendChild(b);
+  });
+}
+
+function pDraw(link) {
+  const marks = link ? [{ r: link.r, f: link.f, label: DEG[pN], cls: "shape" }] : [];
+  drawFret($("pBoard"), { root: pRoot, marks, link, onTap: () => pPlayRoot() });
+}
+
+async function pStartTest() {
+  if (!(await ensureMic())) return;
+  // One root for the whole test, so the hand stays around it
+  const r = pLevel.strings[Math.floor(Math.random() * pLevel.strings.length)];
+  let f; do { f = 1 + Math.floor(Math.random() * 9); } while (pRoot && pRoot.r === r && pRoot.f === f);
+  pRoot = { r, f };
+  pQueue = shuffle(pLevel.set.slice()); pi = 0; pResults = [];
+  pShow("pTest");
+  $("pRootLine").innerHTML = `Root: <b>${noteOf(pRootM())}</b> <span class="progress">(${STRING_NAME[pRoot.r]} string, ${fretWord(pRoot.f)})</span>`;
+  const left = () => MIC_SETTLE - (performance.now() - micAt);
+  if (isWebKit && left() > 0) {
+    pState = "settling"; $("pAsk").innerHTML = ""; $("pShape").hidden = true; pN = pQueue[0]; pDraw();
+    const tick = () => {
+      if (pState !== "settling") return;
+      if (left() <= 0) return pNextQ();
+      pMsg("", `Getting the microphone ready… ${Math.ceil(left() / 1000)}s<br><span class="progress">Safari hears notes a little sharp just after the mic opens. Find the root on your guitar while you wait.</span>`);
+      pTimer = setTimeout(tick, 250);
+    };
+    tick();
+  } else pNextQ();
+}
+
+function pNextQ() {
+  clearTimeout(pTimer);
+  if (pi >= pQueue.length) return pFinish();
+  pN = pQueue[pi]; pTries = TRIES; pState = "ask";
+  $("pNext").hidden = true; $("pSkip").hidden = false; $("pShape").hidden = true;
+  $("pProgress").textContent = `Interval ${pi + 1} of ${pQueue.length}`;
+  $("pBar").style.width = (pi / pQueue.length * 100) + "%";
+  $("pAsk").innerHTML = `<span class="lchip">${DEG[pN]}</span><span>Play the <b>${name(pN)}</b></span>`;
+  pMsg("", "Listening…");
+  pDraw();
+  pPlayRoot();
+}
+
+function pShowShape(note) {
+  const p = bestPos(pRoot.r, pRoot.f, pN), iv = INTERVALS.find(i => i.n === pN);
+  pDraw(p);
+  $("pShape").innerHTML = `<b>${iv.name}</b>: ${shapeFrom(pRoot, p)} from the root${note ? `<div class="hint" style="margin-top:4px">${note}</div>` : ""}<div class="songs">${iv.songs.join("<br>")}</div>`;
+  $("pShape").hidden = false;
+}
+
+function pRight() {
+  if (pState === "practice") { pMsg("good", "That's it."); return pAdvance(1200); }
+  if (pState !== "ask") return;
+  pResults.push({ n: pN, tries: TRIES - pTries + 1 });
+  pState = "done";
+  pMsg("good", `Yes, that's the ${name(pN)}!`);
+  pShowShape("You might have played it somewhere else, which is fine. This is the nearest shape.");
+  pAdvance(2500);
+}
+function pAdvance(ms) {
+  pState = "done";
+  $("pSkip").hidden = true; $("pNext").hidden = false;
+  $("pNext").textContent = pi + 1 >= pQueue.length ? "See my score →" : "Next →";
+  clearTimeout(pTimer); pTimer = setTimeout(() => { pi++; pNextQ(); }, ms);
+}
+
+function pWrong(m) {
+  if (pState !== "ask") return;
+  const n = m - pRootM();
+  if (n === 0) return;                     // checking the root is fine
+  if (((n - pN) % 12 + 12) % 12 === 0) {   // right note name, wrong octave: no try lost
+    pMsg("", `Right note, wrong octave. Find the one above the root, within an octave. ${pDots()}`);
+    return;
+  }
+  pTries--;
+  const what = n < 0 ? "That's below the root." : n > 12 ? "That's more than an octave up." : `That's a ${name(n)}.`;
+  if (pTries > 0) {
+    pMsg("bad", `${what} ${pTries} more ${pTries === 1 ? "try" : "tries"}. ${pDots()}`);
+    return;
+  }
+  pResults.push({ n: pN, tries: 0 });
+  pState = "practice";
+  pMsg("bad", `${what} Here's where the ${name(pN)} is. Play it to move on.`);
+  pShowShape();
+  $("pSkip").hidden = false;
+  audio(); stopAll();
+  const t = ctx.currentTime + 0.05;
+  [pRootM(), pRootM() + pN].forEach((mm, i) => { const g = playNote(mm, t + i); g.gain.setValueAtTime(0.55, t + i + 0.94); g.gain.linearRampToValueAtTime(0, t + i + 1.0); });
+  pIgnoreUntil = performance.now() + 2400;
+}
+
+function pFinish() {
+  clearTimeout(pTimer); pState = "off"; stopAll();
+  $("pBar").style.width = "100%";
+  const first = pResults.filter(r => r.tries === 1).length, got = pResults.filter(r => r.tries > 0).length;
+  $("pScore").textContent = `${got} / ${pResults.length}`;
+  $("pScoreNote").textContent = `${first} first time, ${got - first} after another try, ${pResults.length - got} to keep working on.`;
+  const verdict = r => !r ? '<span class="no">Skipped</span>' : r.tries === 0 ? '<span class="no">Missed</span>'
+    : r.tries === 1 ? '<span class="ok">First try</span>' : `<span class="ok">Try ${r.tries}</span>`;
+  $("pBreakdown").innerHTML = INTERVALS.filter(i => pLevel.set.includes(i.n)).map(i =>
+    `<tr><td>${i.name}</td><td class="r">${verdict(pResults.find(x => x.n === i.n))}</td></tr>`).join("");
+  pShow("pResults");
+}
+
+function pStop() { clearTimeout(pTimer); pState = "off"; stopAll(); renderPlayLevels(); pShow("pStart"); }
+$("pGo").onclick = pStartTest;
+$("pAgain").onclick = pStartTest;
+$("pHome").onclick = pStop;
+$("pQuit").onclick = pStop;
+$("pRootBtn").onclick = pPlayRoot;
+$("pSkip").onclick = () => { pi++; pNextQ(); };
+$("pNext").onclick = () => { clearTimeout(pTimer); pi++; pNextQ(); };
+renderPlayLevels();
+
 // ---------- Tabs between the trainers ----------
 function setTab(t) {
-  if (!["learn", "intervals", "find", "licks"].includes(t)) t = "intervals";
+  if (!["learn", "intervals", "find", "play", "licks"].includes(t)) t = "intervals";
+  if (t !== "play" && pState !== "off") pStop();
+  $("playApp").hidden = t !== "play";
   store.set("tab", t);
   document.querySelectorAll(".tabs .pill").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
   $("learnApp").hidden = t !== "learn";
