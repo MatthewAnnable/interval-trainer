@@ -126,6 +126,8 @@
   /* Play on guitar */
   .ask { font-size:22px; margin:6px 0 0; display:flex; align-items:center; gap:10px; min-height:40px; }
   .ask .lchip { width:40px; height:40px; font-size:16px; background:var(--accent); }
+  .listen { display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--good); margin-right:8px; animation:pulse 1.2s infinite; }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.25; } }
   .meter { height:8px; background:var(--chip); border-radius:4px; overflow:hidden; margin:8px 0 10px; }
   .meter i { display:block; height:100%; width:0; background:var(--good); transition:width .05s; }
   .mic input[type=range] { width:100%; margin-top:4px; }
@@ -228,7 +230,7 @@
   <section id="fStart">
     <div class="levels" id="fLevels"></div>
     <div class="card">
-      <p class="hint" style="margin:0">Every interval in the level comes up once, in a random order, from a different root each time. Any place on the neck with the right note counts. You get three tries at each one. There's no timer, so take as long as you like and replay as often as you need.</p>
+      <p class="hint" style="margin:0">Level 1 has every interval once. Later levels pick 12 at random, so any interval can come up at any time. There's a new root each time. Any place on the neck with the right note counts. You get three tries at each one. There's no timer, so take as long as you like and replay as often as you need.</p>
       <p class="hint narrow-only">On a phone, turn it sideways for a bigger fretboard.</p>
     </div>
     <button class="big" id="fGo">Start the test</button>
@@ -272,7 +274,13 @@
   <section id="pStart">
     <div class="levels" id="pLevels"></div>
     <div class="card">
-      <p class="hint" style="margin:0">Every interval in the level comes up once, in a random order, all from the same root. Play single notes and let each one ring. You get three tries at each one. If you miss, the app shows you where it is, and you play it to move on. No timer.</p>
+      <p style="margin:0 0 6px;font-weight:600">How it works</p>
+      <ol class="hint" style="margin:0;padding-left:20px">
+        <li>The app plays one note, the root, and shows it on the fretboard.</li>
+        <li>It shows an interval, like "Play the Major 3rd". Play that note on your guitar, above the root.</li>
+        <li>It listens. When you get it, it moves on to the next one by itself, so you can keep your hands on the guitar.</li>
+      </ol>
+      <p class="hint">Play single notes and let each one ring. Three tries at each. If you miss, the app shows you where it is, and you play it to move on. Level 1 has every interval once; later levels pick 12 at random, all from the same root. No timer.</p>
       <p class="hint">Allow the microphone when your browser asks. Tune up first: the app checks the exact note.</p>
     </div>
     <button class="big" id="pGo">Start the test</button>
@@ -486,8 +494,9 @@ function renderStart() {
     ? `Listen to three notes in ${level.key}. The first is always C. Work out how far the second and third notes are from that C, and tap them in the order you hear them.`
     : `Listen to two notes going ${level.dir} and work out the jump between them.`;
   $("startHint").textContent = (level.key
-    ? "Every note of the scale comes up once as note 2 and once as note 3, in a random order."
-    : "Every interval in the level comes up once, in a random order.")
+    ? "Ten questions, each with two notes from the scale picked at random."
+    : level.id === 1 ? "Every interval in the level comes up once, in a random order."
+    : `${QCOUNT(level.set)} intervals picked at random, so any of them can come up at any time, even more than once.`)
     + " You get three tries at each one. There's no timer, so take as long as you like and replay as often as you need.";
 }
 
@@ -502,12 +511,6 @@ function renderLevels() {
   });
 }
 
-// Key levels: pairs of two different notes
-function eachPairs(set) {
-  let a, b;
-  do { a = shuffle(set.slice()); b = shuffle(set.slice()); } while (a.some((n, i) => n === b[i]));
-  return a.map((n, i) => [n, b[i]]);
-}
 
 // Going up: the worksheet as it is. Going down: both lists, arrowed, with the
 // worksheet's "going down" songs moved into the down list rather than shown twice.
@@ -530,11 +533,38 @@ function renderSongToggles() {
 }
 function toggleSongs() { store.set(songsKey(), !songsOn()); renderSongToggles(); }
 
+// Level 1 of each section has every interval once. Later levels pick at random
+// (10 questions, or 12 when the level has all 12 intervals) so any interval can
+// come up at any time: students found "one of each" got easier towards the end
+// (Matthew, 16/11/2026). Never the same one twice in a row.
+const QCOUNT = set => set.length >= 12 ? 12 : 10;
+function randomPicks(set, count) {
+  const q = [];
+  while (q.length < count) {
+    const n = set[Math.floor(Math.random() * set.length)];
+    if (q.length && q[q.length - 1] === n && set.length > 1) continue;
+    q.push(n);
+  }
+  return q;
+}
+const questionOrder = (lvl) => lvl.id === 1 ? shuffle(lvl.set.slice()) : randomPicks(lvl.set, QCOUNT(lvl.set));
+// Key levels after level 1: random pairs of two different notes
+function randomPairs(set, count) {
+  return Array.from({ length: count }, () => { let a, b; do { a = set[Math.floor(Math.random() * set.length)]; b = set[Math.floor(Math.random() * set.length)]; } while (a === b); return [a, b]; });
+}
+// Results table: one row per interval that came up, with how each one went
+function verdictCell(rs) {
+  return rs.map(r => !r || r.tries == null ? '<span class="no">Skipped</span>' : r.tries === 0 ? '<span class="no">Missed</span>'
+    : r.tries === 1 ? '<span class="ok">First try</span>' : `<span class="ok">Try ${r.tries}</span>`).join(", ");
+}
+const breakdownRows = (set, res) => INTERVALS.filter(i => set.includes(i.n) && res.some(x => x.n === i.n)).map(i =>
+  `<tr><td>${i.name}</td><td class="r">${verdictCell(res.filter(x => x.n === i.n))}</td></tr>`).join("");
+
 function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 
 function startTest() {
   audio();
-  queue = level.key ? eachPairs(level.set) : shuffle(level.set.slice()).map(n => [n]);
+  queue = level.key ? randomPairs(level.set, 10) : questionOrder(level).map(n => [n]);
   qi = 0; results = [];
   show("test");
   renderAnswers();
@@ -691,12 +721,7 @@ function finish() {
   const got = results.filter(r => r.tries > 0).length;
   $("score").textContent = `${got} / ${results.length}`;
   $("scoreNote").textContent = `${first} first time, ${got - first} after another try, ${results.length - got} to keep working on.`;
-  const verdict = r => r.tries === 0 ? '<span class="no">Missed</span>'
-    : r.tries === 1 ? '<span class="ok">First try</span>'
-    : `<span class="ok">Try ${r.tries}</span>`;
-  const rows = INTERVALS.filter(i => level.set.includes(i.n)).map(i =>
-    `<tr><td>${i.name}</td><td class="r">${verdict(results.find(x => x.n === i.n))}</td></tr>`);
-  $("breakdown").innerHTML = rows.join("");
+  $("breakdown").innerHTML = breakdownRows(level.set, results);
   show("results");
 }
 
@@ -939,7 +964,8 @@ function lFinish() {
 // Hear the root then a higher note, and tap that note on the fretboard. Any place
 // with the right pitch counts; afterwards the nearest shape from the root is drawn
 // (the same ranking as the guitar interval visualiser). Levels move the root to
-// harder strings rather than adding settings (Matthew, 12/11/2026).
+// harder strings rather than adding settings (Matthew, 12/11/2026). Low E and A
+// string roots were one level each until 16/11/2026: same difficulty, so merged.
 const ALL12 = [1,2,3,4,5,6,7,8,9,10,11,12];
 // Rows top to bottom: high E (0) … low E (5)
 const OPEN = [64, 59, 55, 50, 45, 40];
@@ -947,10 +973,9 @@ const SNAMES = ["E", "B", "G", "D", "A", "E"];
 const STRING_NAME = ["high E", "B", "G", "D", "A", "low E"];
 const F_LEVELS = [
   { id:1, title:"Level 1", desc:"Root on the low E string: up to a perfect 5th", strings:[5], set:[1,2,3,4,5,7] },
-  { id:2, title:"Level 2", desc:"Root on the low E string: up to the octave", strings:[5], set:ALL12 },
-  { id:3, title:"Level 3", desc:"Root on the A string: up to the octave", strings:[4], set:ALL12 },
-  { id:4, title:"Level 4", desc:"Root on the D or G string: shapes shift at the B string", strings:[3,2], set:ALL12 },
-  { id:5, title:"Level 5", desc:"Root on any of the four lower strings", strings:[5,4,3,2], set:ALL12 },
+  { id:2, title:"Level 2", desc:"Root on the low E or A string: up to the octave", strings:[5,4], set:ALL12 },
+  { id:3, title:"Level 3", desc:"Root on the D or G string: shapes shift at the B string", strings:[3,2], set:ALL12 },
+  { id:4, title:"Level 4", desc:"Root on any of the four lower strings", strings:[5,4,3,2], set:ALL12 },
 ];
 const DEG = { 0:"R", 1:"♭2", 2:"2", 3:"♭3", 4:"3", 5:"4", 6:"♭5", 7:"5", 8:"♭6", 9:"6", 10:"♭7", 11:"7", 12:"8" };
 const NF = 12; // frets 0–12 on the board
@@ -1059,7 +1084,7 @@ function pickRoot(n) {
 
 function fStartTest() {
   audio();
-  fQueue = shuffle(fLevel.set.slice());
+  fQueue = questionOrder(fLevel);
   fi = 0; fResults = []; fRoot = null;
   fShow("fTest");
   fNextQ();
@@ -1142,10 +1167,7 @@ function fFinish() {
   const got = fResults.filter(r => r.tries > 0).length;
   $("fScore").textContent = `${got} / ${fResults.length}`;
   $("fScoreNote").textContent = `${first} first time, ${got - first} after another try, ${fResults.length - got} to keep working on.`;
-  const verdict = r => r.tries === 0 ? '<span class="no">Missed</span>'
-    : r.tries === 1 ? '<span class="ok">First try</span>' : `<span class="ok">Try ${r.tries}</span>`;
-  $("fBreakdown").innerHTML = INTERVALS.filter(i => fLevel.set.includes(i.n)).map(i =>
-    `<tr><td>${i.name}</td><td class="r">${verdict(fResults.find(x => x.n === i.n))}</td></tr>`).join("");
+  $("fBreakdown").innerHTML = breakdownRows(fLevel.set, fResults);
   fShow("fResults");
 }
 
@@ -1387,7 +1409,7 @@ async function pStartTest() {
   const r = pLevel.strings[Math.floor(Math.random() * pLevel.strings.length)];
   let f; do { f = 1 + Math.floor(Math.random() * 9); } while (pRoot && pRoot.r === r && pRoot.f === f);
   pRoot = { r, f };
-  pQueue = shuffle(pLevel.set.slice()); pi = 0; pResults = [];
+  pQueue = questionOrder(pLevel); pi = 0; pResults = [];
   pShow("pTest");
   $("pRootLine").innerHTML = `Root: <b>${noteOf(pRootM())}</b> <span class="progress">(${STRING_NAME[pRoot.r]} string, ${fretWord(pRoot.f)})</span>`;
   const left = () => MIC_SETTLE - (performance.now() - micAt);
@@ -1410,8 +1432,8 @@ function pNextQ() {
   $("pNext").hidden = true; $("pSkip").hidden = false; $("pShape").hidden = true;
   $("pProgress").textContent = `Interval ${pi + 1} of ${pQueue.length}`;
   $("pBar").style.width = (pi / pQueue.length * 100) + "%";
-  $("pAsk").innerHTML = `<span class="lchip">${DEG[pN]}</span><span>Play the <b>${name(pN)}</b></span>`;
-  pMsg("", "Listening…");
+  $("pAsk").innerHTML = `<span class="lchip">${DEG[pN]}</span><span>Play the <b>${name(pN)}</b> above ${noteOf(pRootM())}</span>`;
+  pMsg("", `<span class="listen"></span>That note was the root, ${noteOf(pRootM())}. Now play the ${name(pN)} on your guitar. Listening…`);
   pDraw();
   pPlayRoot();
 }
@@ -1430,12 +1452,13 @@ function pRight() {
   pState = "done";
   pMsg("good", `Yes, that's the ${name(pN)}!`);
   pShowShape("You might have played it somewhere else, which is fine. This is the nearest shape.");
-  pAdvance(2500);
+  pAdvance(1800);
 }
+// Moves on by itself: the student's hands are on the guitar (Matthew, 16/11/2026)
 function pAdvance(ms) {
   pState = "done";
-  $("pSkip").hidden = true; $("pNext").hidden = false;
-  $("pNext").textContent = pi + 1 >= pQueue.length ? "See my score →" : "Next →";
+  $("pSkip").hidden = true; $("pNext").hidden = true;
+  $("pMsg").innerHTML += ` <span class="progress">${pi + 1 >= pQueue.length ? "Your score is coming…" : "Next one coming…"}</span>`;
   clearTimeout(pTimer); pTimer = setTimeout(() => { pi++; pNextQ(); }, ms);
 }
 
@@ -1470,10 +1493,7 @@ function pFinish() {
   const first = pResults.filter(r => r.tries === 1).length, got = pResults.filter(r => r.tries > 0).length;
   $("pScore").textContent = `${got} / ${pResults.length}`;
   $("pScoreNote").textContent = `${first} first time, ${got - first} after another try, ${pResults.length - got} to keep working on.`;
-  const verdict = r => !r ? '<span class="no">Skipped</span>' : r.tries === 0 ? '<span class="no">Missed</span>'
-    : r.tries === 1 ? '<span class="ok">First try</span>' : `<span class="ok">Try ${r.tries}</span>`;
-  $("pBreakdown").innerHTML = INTERVALS.filter(i => pLevel.set.includes(i.n)).map(i =>
-    `<tr><td>${i.name}</td><td class="r">${verdict(pResults.find(x => x.n === i.n))}</td></tr>`).join("");
+  $("pBreakdown").innerHTML = breakdownRows(pLevel.set, pResults);
   pShow("pResults");
 }
 
@@ -1483,7 +1503,7 @@ $("pAgain").onclick = pStartTest;
 $("pHome").onclick = pStop;
 $("pQuit").onclick = pStop;
 $("pRootBtn").onclick = pPlayRoot;
-$("pSkip").onclick = () => { pi++; pNextQ(); };
+$("pSkip").onclick = () => { if (pState === "ask") pResults.push({ n: pN, tries: null }); clearTimeout(pTimer); pi++; pNextQ(); };
 $("pNext").onclick = () => { clearTimeout(pTimer); pi++; pNextQ(); };
 renderPlayLevels();
 
