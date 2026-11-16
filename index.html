@@ -1024,6 +1024,7 @@ function lFinish() {
 // (the same ranking as the guitar interval visualiser). Levels move the root to
 // harder strings rather than adding settings (Matthew, 12/11/2026). Low E and A
 // string roots were one level each until 16/11/2026: same difficulty, so merged.
+// D and G are separate levels: the shapes from each are different ones to learn.
 const ALL12 = [1,2,3,4,5,6,7,8,9,10,11,12];
 // Rows top to bottom: high E (0) … low E (5)
 const OPEN = [64, 59, 55, 50, 45, 40];
@@ -1032,8 +1033,9 @@ const STRING_NAME = ["high E", "B", "G", "D", "A", "low E"];
 const F_LEVELS = [
   { id:1, title:"Level 1", desc:"Root on the low E string: up to a perfect 5th", strings:[5], set:[1,2,3,4,5,7] },
   { id:2, title:"Level 2", desc:"Root on the low E or A string: up to the octave", strings:[5,4], set:ALL12 },
-  { id:3, title:"Level 3", desc:"Root on the D or G string: shapes shift at the B string", strings:[3,2], set:ALL12 },
-  { id:4, title:"Level 4", desc:"Root on any of the four lower strings", strings:[5,4,3,2], set:ALL12 },
+  { id:3, title:"Level 3", desc:"Root on the D string: shapes shift at the B string", strings:[3], set:ALL12 },
+  { id:4, title:"Level 4", desc:"Root on the G string: shapes shift at the B string", strings:[2], set:ALL12 },
+  { id:5, title:"Level 5", desc:"Root on any of the four lower strings", strings:[5,4,3,2], set:ALL12 },
 ];
 const DEG = { 0:"R", 1:"♭2", 2:"2", 3:"♭3", 4:"3", 5:"4", 6:"♭5", 7:"5", 8:"♭6", 9:"6", 10:"♭7", 11:"7", 12:"8" };
 const NF = 12; // frets 0–12 on the board
