@@ -280,7 +280,8 @@
         <li>It shows an interval, like "Play the Major 3rd". Play that note on your guitar, above the root.</li>
         <li>It listens. When you get it, it moves on to the next one by itself, so you can keep your hands on the guitar.</li>
       </ol>
-      <p class="hint">Play single notes and let each one ring. Three tries at each. If you miss, the app shows you where it is, and you play it to move on. Level 1 has every interval once; later levels pick 12 at random, all from the same root. No timer.</p>
+      <p class="hint">Play single notes and let each one ring. Three tries at each. If you miss, the app shows you where it is, and you play it to move on. Every interval in the level comes up once, all from the same root. No timer.</p>
+      <p class="hint" id="pMicStatus" hidden></p>
       <p class="hint">Allow the microphone when your browser asks. Tune up first: the app checks the exact note.</p>
     </div>
     <button class="big" id="pGo">Start the test</button>
@@ -1270,7 +1271,16 @@ renderLearn();
 // student plays it. Pitch detection and the note tracker are the Classical Note
 // Trainer's (single held notes, which it hears well on a real guitar); the mic
 // marking that failed was for whole licks. Matthew, 13/11/2026.
-let pLevel = F_LEVELS.find(l => l.id === store.get("pLevel", 1)) || F_LEVELS[0];
+// Play has its own levels: the D and G strings are separate here because the
+// shapes from each are different ones to learn (Matthew, 16/11/2026).
+const P_LEVELS = [
+  { id:1, title:"Level 1", desc:"Root on the low E string: up to a perfect 5th", strings:[5], set:[1,2,3,4,5,7] },
+  { id:2, title:"Level 2", desc:"Root on the low E or A string: up to the octave", strings:[5,4], set:ALL12 },
+  { id:3, title:"Level 3", desc:"Root on the D string: shapes shift at the B string", strings:[3], set:ALL12 },
+  { id:4, title:"Level 4", desc:"Root on the G string: shapes shift at the B string", strings:[2], set:ALL12 },
+  { id:5, title:"Level 5", desc:"Root on any of the four lower strings", strings:[5,4,3,2], set:ALL12 },
+];
+let pLevel = P_LEVELS.find(l => l.id === store.get("pLevel", 1)) || P_LEVELS[0];
 let pQueue = [], pi = 0, pRoot = null, pN = 0, pTries = TRIES, pResults = [];
 let pState = "off";   // off | settling | ask | practice | done
 let pIgnoreUntil = 0, pTimer = null;
@@ -1332,11 +1342,12 @@ let micOn = false, micAt = 0, analyser = null, micBuf = null, micLast = 0;
 $("pGate").value = store.get("pGate", 70);
 $("pGate").oninput = () => store.set("pGate", +$("pGate").value);
 
+function micErr(t) { pMsg("bad", t); $("pMicStatus").textContent = t; $("pMicStatus").hidden = false; }
 async function ensureMic() {
   audio();
   if (micOn) return true;
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    pMsg("bad", "This browser can't reach the microphone. Try Chrome or Safari.");
+    micErr("This browser can't reach the microphone. Try Chrome or Safari.");
     return false;
   }
   try {
@@ -1349,7 +1360,7 @@ async function ensureMic() {
     requestAnimationFrame(micLoop);
     return true;
   } catch (e) {
-    pMsg("bad", `Couldn't use the microphone (${e.message || e.name}). Allow it in your browser and try again.`);
+    micErr(`Couldn't use the microphone (${e.message || e.name}). Allow it in your browser and try again.`);
     return false;
   }
 }
@@ -1389,7 +1400,7 @@ function pDots() { let h = '<span class="tries">'; for (let i = 0; i < TRIES; i+
 
 function renderPlayLevels() {
   $("pLevels").innerHTML = "";
-  F_LEVELS.forEach(l => {
+  P_LEVELS.forEach(l => {
     const b = document.createElement("button");
     b.className = "level" + (l === pLevel ? " on" : "");
     b.innerHTML = `<b>${l.title}</b><span>${l.desc} · ${l.set.length} intervals</span>`;
@@ -1409,7 +1420,9 @@ async function pStartTest() {
   const r = pLevel.strings[Math.floor(Math.random() * pLevel.strings.length)];
   let f; do { f = 1 + Math.floor(Math.random() * 9); } while (pRoot && pRoot.r === r && pRoot.f === f);
   pRoot = { r, f };
-  pQueue = questionOrder(pLevel); pi = 0; pResults = [];
+  // Every interval once on every level: the app names the interval, so a repeat
+  // would only test the student's memory of the last one (Matthew, 16/11/2026)
+  pQueue = shuffle(pLevel.set.slice()); pi = 0; pResults = [];
   pShow("pTest");
   $("pRootLine").innerHTML = `Root: <b>${noteOf(pRootM())}</b> <span class="progress">(${STRING_NAME[pRoot.r]} string, ${fretWord(pRoot.f)})</span>`;
   const left = () => MIC_SETTLE - (performance.now() - micAt);
@@ -1520,7 +1533,19 @@ function setTab(t) {
   $("licksApp").hidden = t !== "licks";
   stopLick();
 }
-document.querySelectorAll(".tabs .pill").forEach(b => b.onclick = () => setTab(b.dataset.tab));
+document.querySelectorAll(".tabs .pill").forEach(b => b.onclick = () => {
+  setTab(b.dataset.tab);
+  // Open the mic as soon as Play is tapped, so Safari's settling time runs
+  // while the student reads and picks a level rather than after Start
+  if (b.dataset.tab === "play") ensureMic().then(ok => { if (ok) pMicStatusTick(); });
+});
+function pMicStatusTick() {
+  const el = $("pMicStatus");
+  if (!micOn || !isWebKit) { el.hidden = true; return; }
+  const left = MIC_SETTLE - (performance.now() - micAt);
+  el.hidden = left <= 0;
+  if (left > 0) { el.textContent = `Microphone getting ready: ${Math.ceil(left / 1000)}s. Tune up and find your starting string while you wait.`; setTimeout(pMicStatusTick, 500); }
+}
 $("lGo").onclick = lStartRound;
 $("lAgain").onclick = lStartRound;
 $("lHome").onclick = () => { renderLickLevels(); lShow("lStart"); };
