@@ -98,7 +98,7 @@
   .fb { display:block; width:100%; height:auto; touch-action:manipulation; user-select:none; -webkit-user-select:none; }
   .fb .cell { fill:transparent; cursor:pointer; }
   .fb .lab { fill:var(--mute); font-size:13px; font-weight:600; }
-  .fb .dot text { font-size:14px; font-weight:700; fill:#fff; pointer-events:none; }
+  .fb .dot text { font-size:13px; letter-spacing:-.3px; font-weight:700; fill:#fff; pointer-events:none; }
   .fb .dot circle { stroke:var(--card); stroke-width:2; pointer-events:none; }
   .fb .root circle { fill:var(--ink); } .fb .root text { fill:var(--bg); }
   .fb .right circle { fill:var(--good); }
@@ -192,7 +192,7 @@
 </div>
 
 <div id="learnApp" hidden>
-  <p class="sub">Every interval from the root, all in one place. Tap any note on the fretboard to make it the root. Tap an interval in the list to hear it and see where it is.</p>
+  <p class="sub">Every interval from the root, all in one place. Tap the fretboard to move the root. Tap an interval in the list to hear it and see where it is.</p>
   <div class="row" id="lnModes" style="margin-bottom:12px">
     <button class="pill" data-mode="string">Along one string</button>
     <button class="pill" data-mode="position">In one hand position</button>
@@ -203,6 +203,11 @@
     <button class="pill" data-show="minor">Minor scale</button>
     <button class="pill" data-show="all">All notes</button>
     <button class="pill" data-show="none">Hide all</button>
+  </div>
+  <div class="row" id="lnLabels" style="margin-bottom:12px">
+    <span class="progress">Dots show:</span>
+    <button class="pill" data-labels="intervals">Intervals</button>
+    <button class="pill" data-labels="notes">Note names</button>
   </div>
   <div class="rootline" id="lnRoot"></div>
   <p class="hint narrow-only" style="margin:0 0 6px">Turn your phone sideways for a bigger fretboard.</p>
@@ -988,7 +993,7 @@ function svgEl(tag, a, txt) {
 // One fretboard drawing for both Learn and Find. It shows 13 frets starting at
 // `start` (0 = the open strings and the nut), so Learn can slide up the neck.
 // marks: {r, f, label, cls}; link: {r, f, color?} draws a dashed line from the root.
-function drawFret(s, { start = 0, root, marks = [], link = null, onTap }) {
+function drawFret(s, { start = 0, root, rootLabel = "R", marks = [], link = null, onTap }) {
   const x = f => fx(f - start);
   s.setAttribute("viewBox", `0 0 ${BW} ${BH}`);
   s.innerHTML = "";
@@ -1011,7 +1016,7 @@ function drawFret(s, { start = 0, root, marks = [], link = null, onTap }) {
     s.appendChild(svgEl("line", { x1:x(root.f), y1:fy(root.r), x2:x(link.f), y2:fy(link.r), class:"link", ...st }));
     if (link.color) s.appendChild(svgEl("circle", { cx:x(link.f), cy:fy(link.r), r:20, fill:"none", stroke:link.color, "stroke-width":2.5 }));
   }
-  [{ r:root.r, f:root.f, label:"R", cls:"root" }].concat(marks).forEach(m => {
+  [{ r:root.r, f:root.f, label:rootLabel, cls:"root" }].concat(marks).forEach(m => {
     const g = svgEl("g", { class:"dot " + m.cls });
     g.appendChild(svgEl("circle", { cx:x(m.f), cy:fy(m.r), r:15 }));
     g.appendChild(svgEl("text", { x:x(m.f), y:fy(m.r) + 5, "text-anchor":"middle" }, m.label));
@@ -1162,42 +1167,60 @@ renderFindLevels();
 const GRP_COLOR = { both:"#1d9e75", major:"#357fd0", minor:"#d85a30", none:"#8a7f72" };
 const grpOf = n => [2, 5, 7, 12].includes(n) ? "both" : [4, 9, 11].includes(n) ? "major" : [3, 8, 10].includes(n) ? "minor" : "none";
 const SHOWS = { major:["both", "major"], minor:["both", "minor"], all:["both", "major", "minor", "none"], none:[] };
-let lnRoot = store.get("lnRoot", { r:5, f:5 });
+let lnRoot = store.get("lnRoot", { r:5, f:5 });   // In one hand position: any note
+let lnStr = store.get("lnStr", 5);                  // Along one string: an open string, so it shows frets 0–12
 let lnMode = store.get("lnMode", "position");
 let lnShowSet = SHOWS[store.get("lnShow", "all")] ? store.get("lnShow", "all") : "all";
+let lnLabels = store.get("lnLabels", "intervals");  // what the dots say: intervals | notes
 const lnShow = {};
 let lnActive = null;
+const lnRootNow = () => lnMode === "string" ? { r: lnStr, f: 0 } : lnRoot;
+
+// Note names spelled from the root's letter, so the A major scale has G#, not Ab:
+// 2nds use the next letter, 3rds the one after, and so on. A double sharp or
+// double flat falls back to the plain name, and so do Cb, Fb, E# and B#.
+const LETTERS = ["C", "D", "E", "F", "G", "A", "B"], LETTER_PC = [0, 2, 4, 5, 7, 9, 11];
+const STEPS = [0, 1, 1, 2, 2, 3, 4, 4, 5, 5, 6, 6, 7];
+function spell(rootM, n) {
+  const rootName = noteOf(rootM), li = LETTERS.indexOf(rootName[0]);
+  const l = (li + STEPS[n]) % 7, pc = ((rootM + n) % 12 + 12) % 12;
+  const d = ((pc - LETTER_PC[l]) % 12 + 18) % 12 - 6;
+  const out = d === 0 ? LETTERS[l] : d === 1 ? LETTERS[l] + "#" : d === -1 ? LETTERS[l] + "b" : noteOf(rootM + n);
+  return { Cb:"B", Fb:"E", "E#":"F", "B#":"C" }[out] || out;   // beginners: no Cb, Fb, E#, B#
+}
 
 // Where each interval goes in the current view (frets up to 24)
 function lnPos(n) {
-  return lnMode === "string" ? { r: lnRoot.r, f: lnRoot.f + n } : bestPos(lnRoot.r, lnRoot.f, n, 24);
+  const root = lnRootNow();
+  return lnMode === "string" ? { r: root.r, f: root.f + n } : bestPos(root.r, root.f, n, 24);
 }
 
 function renderLearn() {
-  if (lnMode === "string" && lnRoot.f > 12) lnRoot = { r: lnRoot.r, f: lnRoot.f - 12 };
+  const root = lnRootNow(), rootM = fPitch(root.r, root.f);
   document.querySelectorAll("#lnModes .pill").forEach(b => b.classList.toggle("on", b.dataset.mode === lnMode));
   document.querySelectorAll("#lnGroups .pill").forEach(b => b.classList.toggle("on", b.dataset.show === lnShowSet));
+  document.querySelectorAll("#lnLabels .pill").forEach(b => b.classList.toggle("on", b.dataset.labels === lnLabels));
   Object.keys(GRP_COLOR).forEach(g => lnShow[g] = SHOWS[lnShowSet].includes(g));
   const pos = {};
   ALL12.forEach(n => pos[n] = lnPos(n));
   // Slide the board up the neck only when the notes don't fit in frets 0–12
-  const frets = [lnRoot.f].concat(ALL12.map(n => pos[n].f));
+  const frets = [root.f].concat(ALL12.map(n => pos[n].f));
   const start = Math.min(Math.min(...frets), Math.max(0, Math.max(...frets) - NF));
+  const label = n => lnLabels === "notes" ? spell(rootM, n) : DEG[n];
   const marks = ALL12.filter(n => lnShow[grpOf(n)] || n === lnActive)
-    .map(n => ({ r: pos[n].r, f: pos[n].f, label: DEG[n], cls: "g-" + grpOf(n) }));
+    .map(n => ({ r: pos[n].r, f: pos[n].f, label: label(n), cls: "g-" + grpOf(n) }));
   const link = lnActive ? { r: pos[lnActive].r, f: pos[lnActive].f, color: GRP_COLOR[grpOf(lnActive)] } : null;
-  drawFret($("lnBoard"), { start, root: lnRoot, marks, link, onTap: lnTap });
+  drawFret($("lnBoard"), { start, root, rootLabel: lnLabels === "notes" ? noteOf(rootM) : "R", marks, link, onTap: lnTap });
 
-  const rootM = fPitch(lnRoot.r, lnRoot.f);
-  $("lnRoot").innerHTML = `Root: <b>${noteOf(rootM)}</b> <span class="progress">(${STRING_NAME[lnRoot.r]} string, ${fretWord(lnRoot.f)})</span>`;
+  $("lnRoot").innerHTML = `Root: <b>${noteOf(rootM)}</b> <span class="progress">(${STRING_NAME[root.r]} string, ${fretWord(root.f)}) · ${lnMode === "string" ? "tap a string to change it" : "tap any note to move it"}</span>`;
   $("lnList").innerHTML = "";
   ALL12.forEach(n => {
     const g = grpOf(n), shown = lnShow[g], p = pos[n];
     const b = document.createElement("button");
     b.className = "lrow" + (lnActive === n ? " on" : "");
-    const shape = lnMode === "string" ? `same string, +${n} fret${n > 1 ? "s" : ""}` : shapeFrom(lnRoot, p);
+    const shape = lnMode === "string" ? (root.f === 0 ? `fret ${p.f}` : `same string, +${n} fret${n > 1 ? "s" : ""}`) : shapeFrom(root, p);
     b.innerHTML = `<span class="lchip${shown ? "" : " hollow"}" style="${shown ? `background:${GRP_COLOR[g]}` : `color:${GRP_COLOR[g]};border-color:${GRP_COLOR[g]}`}">${DEG[n]}</span>` +
-      `<span class="t"><b>${name(n)}</b> <span class="m">– ${noteOf(rootM + n)}</span><span class="s">${shape}</span></span>`;
+      `<span class="t"><b>${name(n)}</b> <span class="m">– ${spell(rootM, n)}</span><span class="s">${shape}</span></span>`;
     b.onclick = () => { lnActive = lnActive === n ? null : n; if (lnActive) { audio(); playSeq([rootM, rootM + n]); } renderLearn(); };
     $("lnList").appendChild(b);
   });
@@ -1207,15 +1230,17 @@ function renderLearn() {
   $("lnFoot").textContent += " Interval names compare with the major scale: minor means one fret smaller than major, not 'from the minor scale'.";
 }
 
+// No sound on a board tap: here it only moves the root (Matthew, 16/11/2026)
 function lnTap(r, f) {
-  lnRoot = { r, f }; lnActive = null;
-  store.set("lnRoot", lnRoot);
-  audio(); playSeq([fPitch(r, f)]);
+  lnActive = null;
+  if (lnMode === "string") { lnStr = r; store.set("lnStr", r); }
+  else { lnRoot = { r, f }; store.set("lnRoot", lnRoot); }
   renderLearn();
 }
 
-document.querySelectorAll("#lnModes .pill").forEach(b => b.onclick = () => { lnMode = b.dataset.mode; store.set("lnMode", lnMode); renderLearn(); });
+document.querySelectorAll("#lnModes .pill").forEach(b => b.onclick = () => { lnMode = b.dataset.mode; store.set("lnMode", lnMode); lnActive = null; renderLearn(); });
 document.querySelectorAll("#lnGroups .pill").forEach(b => b.onclick = () => { lnShowSet = b.dataset.show; store.set("lnShow", lnShowSet); lnActive = null; renderLearn(); });
+document.querySelectorAll("#lnLabels .pill").forEach(b => b.onclick = () => { lnLabels = b.dataset.labels; store.set("lnLabels", lnLabels); renderLearn(); });
 renderLearn();
 
 // ================= Play on guitar =================
