@@ -144,7 +144,7 @@
 <body>
 <div class="wrap">
   <h1>Ear Trainer</h1>
-  <div class="tabs"><button class="pill" data-tab="learn">Learn</button><button class="pill" data-tab="intervals">Intervals</button><button class="pill" data-tab="find">Find on the neck</button><button class="pill" data-tab="play">Play on guitar</button><button class="pill" data-tab="licks">Pentatonic licks</button></div>
+  <div class="tabs"><button class="pill" data-tab="learn">Learn</button><button class="pill" data-tab="intervals">Hear</button><button class="pill" data-tab="find">Find</button><button class="pill" data-tab="play">Play</button><button class="pill" data-tab="ear">By ear</button><button class="pill" data-tab="licks">Licks</button></div>
 
 <div id="intervalsApp">
   <p class="sub" id="ivSub">Listen to two notes and work out the jump between them.</p>
@@ -322,6 +322,63 @@
     <div class="row">
       <button class="big" id="pAgain">Try again (new root)</button>
       <button class="ghost" id="pHome">Change level</button>
+    </div>
+  </section>
+</div>
+
+<div id="earApp" hidden>
+  <p class="sub">The app plays two notes. Work out the jump by ear and play both notes on your guitar: the root, then the second note. It listens through the microphone.</p>
+
+  <section id="eStart">
+    <div class="levels" id="eLevels"></div>
+    <div class="card">
+      <p style="margin:0 0 6px;font-weight:600">How it works</p>
+      <ol class="hint" style="margin:0;padding-left:20px">
+        <li>The app shows the root on the fretboard and plays two notes: the root, then a higher note.</li>
+        <li>It doesn't tell you the interval. Play the root on your guitar, then the note you heard.</li>
+        <li>It listens for the two notes in a row. When you get it, it moves on by itself.</li>
+      </ol>
+      <p class="hint">Twelve intervals picked at random, up to an octave, so any of them can come up at any time. Three tries at each: after a wrong note it plays the two notes again. If you miss, it shows you the interval and where it is, and you play it to move on. No timer.</p>
+      <p class="hint" id="eMicStatus" hidden></p>
+      <p class="hint">Allow the microphone when your browser asks. Tune up first: the app checks the exact note.</p>
+    </div>
+    <button class="big" id="eGo">Start the test</button>
+  </section>
+
+  <section id="eTest" hidden>
+    <div class="top">
+      <span class="progress" id="eProgress"></span>
+      <button class="pill" id="eQuit">Stop</button>
+    </div>
+    <div class="bar"><i id="eBar"></i></div>
+    <div class="seq" id="eSeq"></div>
+    <div class="msg" id="eMsg"></div>
+    <div class="play">
+      <button class="ghost" id="eReplay">▶ Hear it again</button>
+      <button class="ghost" id="eSkip">Skip</button>
+    </div>
+    <div class="rootline" id="eRootLine" style="margin-top:12px"></div>
+    <p class="hint narrow-only" style="margin:0 0 6px">Turn your phone sideways for a bigger fretboard.</p>
+    <svg class="fb" id="eBoard" role="img" aria-label="Guitar fretboard showing the root note"></svg>
+    <div class="card shapecard" id="eShape" hidden></div>
+    <div class="card mic">
+      <div class="row" style="justify-content:space-between"><span class="progress" id="eHeard">Heard: –</span></div>
+      <div class="meter"><i id="eLevel"></i></div>
+      <label class="progress" for="eGate">Sensitivity (move right if it isn't hearing you)</label>
+      <input id="eGate" type="range" min="0" max="100" value="70">
+    </div>
+  </section>
+
+  <section id="eResults" hidden>
+    <div class="card">
+      <div class="progress">Your score</div>
+      <div class="result-big" id="eScore"></div>
+      <div id="eScoreNote" class="hint" style="margin-top:0"></div>
+    </div>
+    <div class="card"><table id="eBreakdown"></table></div>
+    <div class="row">
+      <button class="big" id="eAgain">Try again</button>
+      <button class="ghost" id="eHome">Change level</button>
     </div>
   </section>
 </div>
@@ -1283,7 +1340,8 @@ const P_LEVELS = [
 let pLevel = P_LEVELS.find(l => l.id === store.get("pLevel", 1)) || P_LEVELS[0];
 let pQueue = [], pi = 0, pRoot = null, pN = 0, pTries = TRIES, pResults = [];
 let pState = "off";   // off | settling | ask | practice | done
-let pIgnoreUntil = 0, pTimer = null;
+let pTimer = null;
+let micIgnoreUntil = 0;   // ignore the mic while the app itself is sounding
 const pRootM = () => fPitch(pRoot.r, pRoot.f);
 
 // ---------- Pitch detection (McLeod normalised square difference) ----------
@@ -1339,10 +1397,13 @@ function pFeed(midi) {
 const isWebKit = /Safari/.test(navigator.userAgent) && !/Chrome|Chromium|Edg|Firefox/.test(navigator.userAgent);
 const MIC_SETTLE = 20000;
 let micOn = false, micAt = 0, analyser = null, micBuf = null, micLast = 0;
-$("pGate").value = store.get("pGate", 70);
-$("pGate").oninput = () => store.set("pGate", +$("pGate").value);
+// One sensitivity setting for Play and By ear
+["pGate", "eGate"].forEach(id => {
+  $(id).value = store.get("pGate", 70);
+  $(id).oninput = () => { store.set("pGate", +$(id).value); ["pGate", "eGate"].forEach(o => $(o).value = $(id).value); };
+});
 
-function micErr(t) { pMsg("bad", t); $("pMicStatus").textContent = t; $("pMicStatus").hidden = false; }
+function micErr(t) { pMsg("bad", t); eMsg("bad", t); ["pMicStatus", "eMicStatus"].forEach(id => { $(id).textContent = t; $(id).hidden = false; }); }
 async function ensureMic() {
   audio();
   if (micOn) return true;
@@ -1365,23 +1426,33 @@ async function ensureMic() {
   }
 }
 
+// Whichever tab is listening: Play or By ear
+function micUser() {
+  if (!$("playApp").hidden && !$("pTest").hidden) return { pre: "p", feed: pFeed, on: ["ask", "practice"].includes(pState) };
+  if (!$("earApp").hidden && !$("eTest").hidden) return { pre: "e", feed: eFeed, on: ["ask", "practice"].includes(eState) };
+  return null;
+}
+// Sensitivity: the slider sets how quiet a note can be (0 → 0.02, 100 → 0.0002;
+// it stopped at 0.0007 until 16/11/2026, which wasn't enough for Matthew's
+// guitar), and near the top it also accepts a less clean note.
 function micLoop(t) {
   requestAnimationFrame(micLoop);
-  if (t - micLast < 50 || $("playApp").hidden || $("pTest").hidden) return;
+  const u = micUser();
+  if (t - micLast < 50 || !u) return;
   micLast = t;
   analyser.getFloatTimeDomainData(micBuf);
   let s = 0; for (let i = 0; i < micBuf.length; i++) s += micBuf[i] * micBuf[i];
   const rms = Math.sqrt(s / micBuf.length);
-  $("pLevel").style.width = Math.min(100, Math.sqrt(rms) * 220) + "%";
-  const gate = 0.02 * Math.pow(0.035, $("pGate").value / 100);
-  if (rms < gate) { pFeed(null); $("pHeard").textContent = "Heard: – (too quiet? move Sensitivity right)"; return; }
+  $(u.pre + "Level").style.width = Math.min(100, Math.sqrt(rms) * 220) + "%";
+  const sens = +$(u.pre + "Gate").value;
+  const gate = 0.02 * Math.pow(0.01, sens / 100), clarity = sens >= 85 ? 0.72 : 0.8;
+  if (rms < gate) { u.feed(null); $(u.pre + "Heard").textContent = "Heard: – (too quiet? move Sensitivity right)"; return; }
   const r = detectPitch(micBuf, ctx.sampleRate);
-  if (!r || r.clarity < 0.8 || r.freq < 70 || r.freq > 1000) { pFeed(null); $("pHeard").textContent = "Heard: sound, but no clear note"; return; }
+  if (!r || r.clarity < clarity || r.freq < 70 || r.freq > 1000) { u.feed(null); $(u.pre + "Heard").textContent = "Heard: sound, but no clear note"; return; }
   const midi = hzToMidi(r.freq), rd = Math.round(midi);
-  $("pHeard").textContent = `Heard: ${noteOf(rd)}${Math.floor(rd / 12) - 1}`;
-  // Ignore the app's own root while it sounds, and the student checking the root
-  if (performance.now() < pIgnoreUntil || !["ask", "practice"].includes(pState)) { pFeed(null); return; }
-  pFeed(midi);
+  $(u.pre + "Heard").textContent = `Heard: ${noteOf(rd)}${Math.floor(rd / 12) - 1}`;
+  if (performance.now() < micIgnoreUntil || !u.on) { u.feed(null); return; }
+  u.feed(midi);
 }
 
 // ---------- Sound: the root, damped after a second so the mic hears the student ----------
@@ -1389,7 +1460,7 @@ function pPlayRoot() {
   audio(); stopAll();
   const t = ctx.currentTime + 0.05, g = playNote(pRootM(), t);
   g.gain.setValueAtTime(0.55, t + 1.0); g.gain.linearRampToValueAtTime(0, t + 1.1);
-  pIgnoreUntil = performance.now() + 1400;
+  micIgnoreUntil = performance.now() + 1400;
   pSeg.key = null; pSeg.frames = 0; pSeg.fired = false;
 }
 
@@ -1497,7 +1568,7 @@ function pWrong(m) {
   audio(); stopAll();
   const t = ctx.currentTime + 0.05;
   [pRootM(), pRootM() + pN].forEach((mm, i) => { const g = playNote(mm, t + i); g.gain.setValueAtTime(0.55, t + i + 0.94); g.gain.linearRampToValueAtTime(0, t + i + 1.0); });
-  pIgnoreUntil = performance.now() + 2400;
+  micIgnoreUntil = performance.now() + 2400;
 }
 
 function pFinish() {
@@ -1520,11 +1591,184 @@ $("pSkip").onclick = () => { if (pState === "ask") pResults.push({ n: pN, tries:
 $("pNext").onclick = () => { clearTimeout(pTimer); pi++; pNextQ(); };
 renderPlayLevels();
 
+// ================= By ear =================
+// The app plays the root and a higher note without naming the interval; the
+// student plays both on the guitar and the mic listens for the pair. Random
+// intervals, because nothing gives the answer away. The root is always shown,
+// so only the second note is found by ear. Matthew, 16/11/2026.
+const E_LEVELS = [
+  { id:1, title:"Level 1", desc:"The root stays put: A on the low E string, fret 5", strings:[5], fixed:{ r:5, f:5 } },
+  { id:2, title:"Level 2", desc:"The root moves along the low E string", strings:[5] },
+  { id:3, title:"Level 3", desc:"The root moves along the D string", strings:[3] },
+  { id:4, title:"Level 4", desc:"The root moves along the G string", strings:[2] },
+  { id:5, title:"Level 5", desc:"The root can be on any of the four lower strings", strings:[5,4,3,2] },
+];
+let eLevel = E_LEVELS.find(l => l.id === store.get("eLevel", 1)) || E_LEVELS[0];
+let eQueue = [], ei = 0, eRoot = null, eN = 0, eTries = TRIES, eResults = [], eState = "off", eTimer = null;
+let eGotRoot = false;   // the student has played the root, so the next note is their answer
+const eRootM = () => fPitch(eRoot.r, eRoot.f);
+
+function eShow(id) { ["eStart", "eTest", "eResults"].forEach(x => $(x).hidden = x !== id); }
+function eMsg(cls, html) { $("eMsg").className = "msg " + cls; $("eMsg").innerHTML = html; }
+function eDots() { let h = '<span class="tries">'; for (let i = 0; i < TRIES; i++) h += `<i class="${i < eTries ? "" : "used"}"></i>`; return h + "</span>"; }
+
+function renderEarLevels() {
+  $("eLevels").innerHTML = "";
+  E_LEVELS.forEach(l => {
+    const b = document.createElement("button");
+    b.className = "level" + (l === eLevel ? " on" : "");
+    b.innerHTML = `<b>${l.title}</b><span>${l.desc} · 12 intervals at random</span>`;
+    b.onclick = () => { eLevel = l; store.set("eLevel", l.id); renderEarLevels(); };
+    $("eLevels").appendChild(b);
+  });
+}
+
+function ePickRoot() {
+  if (eLevel.fixed) return { ...eLevel.fixed };
+  for (let i = 0; i < 200; i++) {
+    const r = eLevel.strings[Math.floor(Math.random() * eLevel.strings.length)], f = 1 + Math.floor(Math.random() * 9);
+    if (eRoot && eRoot.r === r && eRoot.f === f) continue;
+    if (bestPos(r, f, 12)) return { r, f };
+  }
+  return { r: eLevel.strings[0], f: 5 };
+}
+
+// The root → ? guide: green once the app has heard each note
+function eRenderSeq(second) {
+  $("eSeq").innerHTML = `<span class="key">You play:</span><span class="nt ${eGotRoot ? "ok" : "next"}">${noteOf(eRootM())}</span>→<span class="nt ${second ? "ok" : eGotRoot ? "next" : ""}">${second || "?"}</span>`;
+}
+function eDraw(link) {
+  const marks = link ? [{ r: link.r, f: link.f, label: DEG[eN], cls: "shape" }] : [];
+  drawFret($("eBoard"), { root: eRoot, marks, link, onTap: () => {} });
+}
+// Root then the second note, a second apart; the mic ignores them
+function ePlayPair() {
+  audio(); stopAll();
+  const t = ctx.currentTime + 0.05;
+  [eRootM(), eRootM() + eN].forEach((m, i) => {
+    const g = playNote(m, t + i);
+    g.gain.setValueAtTime(0.55, t + i + 0.94); g.gain.linearRampToValueAtTime(0, t + i + 1.0);
+  });
+  micIgnoreUntil = performance.now() + 2300;
+  eSeg.key = null; eSeg.frames = 0; eSeg.fired = false;
+}
+
+async function eStartTest() {
+  if (!(await ensureMic())) return;
+  eQueue = randomPicks(ALL12, 12); ei = 0; eResults = []; eRoot = null;
+  eShow("eTest");
+  const left = () => MIC_SETTLE - (performance.now() - micAt);
+  if (isWebKit && left() > 0) {
+    eState = "settling"; eRoot = ePickRoot(); eN = eQueue[0]; eDraw(); $("eSeq").innerHTML = ""; $("eShape").hidden = true;
+    const tick = () => {
+      if (eState !== "settling") return;
+      if (left() <= 0) return eNextQ(true);
+      eMsg("", `Getting the microphone ready… ${Math.ceil(left() / 1000)}s<br><span class="progress">Safari hears notes a little sharp just after the mic opens. Find the root on your guitar while you wait.</span>`);
+      eTimer = setTimeout(tick, 250);
+    };
+    tick();
+  } else eNextQ();
+}
+
+function eNextQ(keepRoot) {
+  clearTimeout(eTimer);
+  if (ei >= eQueue.length) return eFinish();
+  eN = eQueue[ei]; eTries = TRIES; eState = "ask"; eGotRoot = false;
+  if (!keepRoot || !eRoot) eRoot = ePickRoot();
+  $("eShape").hidden = true; $("eSkip").hidden = false;
+  $("eProgress").textContent = `Question ${ei + 1} of ${eQueue.length}`;
+  $("eBar").style.width = (ei / eQueue.length * 100) + "%";
+  $("eRootLine").innerHTML = `Root: <b>${noteOf(eRootM())}</b> <span class="progress">(${STRING_NAME[eRoot.r]} string, ${fretWord(eRoot.f)})</span>`;
+  eRenderSeq();
+  eMsg("", `<span class="listen"></span>Listen to the two notes. Then play the root, ${noteOf(eRootM())}, and the note you heard after it.`);
+  eDraw();
+  ePlayPair();
+}
+
+// Tracker: like Play's, but either the root or the answer counts as a "known" note
+const eSeg = { key: null, frames: 0, fired: false };
+let eGap = 0;
+function eFeed(midi) {
+  if (midi == null) { if (++eGap >= 2) { eSeg.key = null; eSeg.frames = 0; eSeg.fired = false; } return; }
+  eGap = 0;
+  const rootM = eRootM(), target = rootM + eN;
+  const known = [rootM, target].find(k => Math.abs(midi - k) < 0.5);
+  const key = known != null ? known : Math.round(midi);
+  if (key !== eSeg.key) { eSeg.key = key; eSeg.frames = 0; eSeg.fired = false; }
+  eSeg.frames++;
+  if (eSeg.fired || eSeg.frames < (known != null ? 3 : 4)) return;
+  eSeg.fired = true;
+  eNote(key);
+}
+
+function eNote(m) {
+  const rootM = eRootM(), n = m - rootM;
+  if (eState === "practice") { if (n === eN) { eMsg("good", "That's it."); eAdvance(1200); } return; }
+  if (eState !== "ask") return;
+  if (n === 0) { eGotRoot = true; eRenderSeq(); eMsg("", "Got the root. Now the second note."); return; }
+  if (!eGotRoot) { eMsg("", `Start with the root, ${noteOf(rootM)}, then play the second note.`); return; }
+  if (n === eN) {
+    eResults.push({ n: eN, tries: TRIES - eTries + 1 });
+    eRenderSeq(noteOf(m));
+    eMsg("good", `Yes! That was a ${name(eN)}. <span class="progress">${ei + 1 >= eQueue.length ? "Your score is coming…" : "Next one coming…"}</span>`);
+    eShowShape();
+    return eAdvance(2200);
+  }
+  if (((n - eN) % 12 + 12) % 12 === 0) { eMsg("", `Right note, wrong octave. Find the one above the root, within an octave. ${eDots()}`); return; }
+  eTries--;
+  const what = n < 0 ? "That was below the root." : n > 12 ? "That was more than an octave up." : `That was a ${name(n)}.`;
+  eGotRoot = false;
+  if (eTries > 0) {
+    eRenderSeq();
+    eMsg("bad", `Not quite. ${what} Listen again, then play the root and the second note. ${eTries} more ${eTries === 1 ? "try" : "tries"}. ${eDots()}`);
+    setTimeout(() => { if (eState === "ask") ePlayPair(); }, 600);
+    return;
+  }
+  eResults.push({ n: eN, tries: 0 });
+  eState = "practice";
+  eMsg("bad", `${what} It was a ${name(eN)}. Here it is. Play the second note to move on.`);
+  eShowShape();
+  ePlayPair();
+}
+
+function eShowShape() {
+  const p = bestPos(eRoot.r, eRoot.f, eN), iv = INTERVALS.find(i => i.n === eN);
+  eDraw(p);
+  $("eShape").innerHTML = `<b>${iv.name}</b>: ${shapeFrom(eRoot, p)} from the root<div class="songs">${iv.songs.join("<br>")}</div>`;
+  $("eShape").hidden = false;
+}
+// Moves on by itself: hands are on the guitar
+function eAdvance(ms) {
+  eState = "done"; $("eSkip").hidden = true;
+  clearTimeout(eTimer); eTimer = setTimeout(() => { ei++; eNextQ(); }, ms);
+}
+
+function eFinish() {
+  clearTimeout(eTimer); eState = "off"; stopAll();
+  $("eBar").style.width = "100%";
+  const first = eResults.filter(r => r.tries === 1).length, got = eResults.filter(r => r.tries > 0).length;
+  $("eScore").textContent = `${got} / ${eResults.length}`;
+  $("eScoreNote").textContent = `${first} first time, ${got - first} after another try, ${eResults.length - got} to keep working on.`;
+  $("eBreakdown").innerHTML = breakdownRows(ALL12, eResults);
+  eShow("eResults");
+}
+
+function eStop() { clearTimeout(eTimer); eState = "off"; stopAll(); renderEarLevels(); eShow("eStart"); }
+$("eGo").onclick = eStartTest;
+$("eAgain").onclick = eStartTest;
+$("eHome").onclick = eStop;
+$("eQuit").onclick = eStop;
+$("eReplay").onclick = () => { if (eState === "ask") { eGotRoot = false; eRenderSeq(); } ePlayPair(); };
+$("eSkip").onclick = () => { if (eState === "ask") eResults.push({ n: eN, tries: null }); clearTimeout(eTimer); ei++; eNextQ(); };
+renderEarLevels();
+
 // ---------- Tabs between the trainers ----------
 function setTab(t) {
-  if (!["learn", "intervals", "find", "play", "licks"].includes(t)) t = "intervals";
+  if (!["learn", "intervals", "find", "play", "ear", "licks"].includes(t)) t = "intervals";
   if (t !== "play" && pState !== "off") pStop();
+  if (t !== "ear" && eState !== "off") eStop();
   $("playApp").hidden = t !== "play";
+  $("earApp").hidden = t !== "ear";
   store.set("tab", t);
   document.querySelectorAll(".tabs .pill").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
   $("learnApp").hidden = t !== "learn";
@@ -1537,14 +1781,14 @@ document.querySelectorAll(".tabs .pill").forEach(b => b.onclick = () => {
   setTab(b.dataset.tab);
   // Open the mic as soon as Play is tapped, so Safari's settling time runs
   // while the student reads and picks a level rather than after Start
-  if (b.dataset.tab === "play") ensureMic().then(ok => { if (ok) pMicStatusTick(); });
+  if (b.dataset.tab === "play" || b.dataset.tab === "ear") ensureMic().then(ok => { if (ok) pMicStatusTick(); });
 });
 function pMicStatusTick() {
-  const el = $("pMicStatus");
-  if (!micOn || !isWebKit) { el.hidden = true; return; }
+  const els = [$("pMicStatus"), $("eMicStatus")];
+  if (!micOn || !isWebKit) { els.forEach(el => el.hidden = true); return; }
   const left = MIC_SETTLE - (performance.now() - micAt);
-  el.hidden = left <= 0;
-  if (left > 0) { el.textContent = `Microphone getting ready: ${Math.ceil(left / 1000)}s. Tune up and find your starting string while you wait.`; setTimeout(pMicStatusTick, 500); }
+  els.forEach(el => { el.hidden = left <= 0; el.textContent = `Microphone getting ready: ${Math.ceil(left / 1000)}s. Tune up and find your starting string while you wait.`; });
+  if (left > 0) setTimeout(pMicStatusTick, 500);
 }
 $("lGo").onclick = lStartRound;
 $("lAgain").onclick = lStartRound;
