@@ -474,9 +474,33 @@ const TONIC = 48; // C on the A string, 3rd fret
 
 const TRIES = 3;
 const $ = id => document.getElementById(id);
+// ---------- A task set by a link ----------
+// A lesson summary can open the app on one part and level, e.g.
+// ?v=1&tab=find&level=2 or ?v=1&tab=licks&notes=4&bpm=75. Those settings
+// apply to this visit only: they are held in memory and never written over
+// the level the student had saved for themselves. Anything odd is ignored.
+const TASK = (() => {
+  const out = {};
+  try {
+    const q = new URLSearchParams(location.search);
+    const tab = { learn:"learn", hear:"intervals", find:"find", play:"play", byear:"ear", licks:"licks" }[(q.get("tab") || "").toLowerCase()];
+    if (!tab) return out;
+    out.tab = tab;
+    const num = k => /^\d{1,3}$/.test(q.get(k) || "") ? +q.get(k) : null;
+    const levelKey = { intervals:"level", find:"fLevel", play:"pLevel", ear:"eLevel" }[tab];
+    const max = { intervals:6, find:5, play:5, ear:5 }[tab];
+    const lv = num("level");
+    if (levelKey && lv >= 1 && lv <= max) out[levelKey] = lv;
+    if (tab === "licks") {
+      if ([3, 4, 5, 6].includes(num("notes"))) out.lickLen = num("notes");
+      if ([60, 75, 90].includes(num("bpm"))) out.bpm = num("bpm");
+    }
+  } catch {}
+  return out;
+})();
 const store = {
-  get(k, d) { try { const v = localStorage.getItem("iet-" + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
-  set(k, v) { try { localStorage.setItem("iet-" + k, JSON.stringify(v)); } catch {} },
+  get(k, d) { if (k in TASK) return TASK[k]; try { const v = localStorage.getItem("iet-" + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { if (k in TASK) { TASK[k] = v; return; } try { localStorage.setItem("iet-" + k, JSON.stringify(v)); } catch {} },
 };
 
 let level = LEVELS.find(l => l.id === store.get("level", 1)) || LEVELS[0];
